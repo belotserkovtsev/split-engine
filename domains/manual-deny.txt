@@ -1,0 +1,1 @@
+# domains that should never be auto-added

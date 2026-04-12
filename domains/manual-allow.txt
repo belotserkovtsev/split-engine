@@ -1,0 +1,3 @@
+# one domain per line
+# example:
+# whoer.net
