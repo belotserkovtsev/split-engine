@@ -56,8 +56,13 @@ go build ./cmd/split-engine
 ./split-engine probe example.com
 ./split-engine observe some.domain.dev 10.10.0.2
 ./split-engine list
+./split-engine tail /var/log/dnsmasq.log              # follow live
+./split-engine tail -from-start /var/log/dnsmasq.log  # process existing content
 go test ./...
 ```
+
+`tail` ingests one observation per client `query[A|AAAA]` line emitted by
+dnsmasq (`log-queries=extra`). Gateway's own queries (10.10.0.1) are skipped.
 
 ## States
 

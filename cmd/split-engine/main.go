@@ -2,10 +2,11 @@
 //
 // Subcommands:
 //
-//	init-db         create/update the SQLite schema
-//	probe <domain>  run a DNS/TCP/TLS probe and persist the result
-//	observe <d>     record a synthetic DNS observation (for dev)
-//	list [N]        show the N most recent domains (default 20)
+//	init-db                 create/update the SQLite schema
+//	probe <domain>          run a DNS/TCP/TLS probe and persist the result
+//	observe <d>             record a synthetic DNS observation (for dev)
+//	list [N]                show the N most recent domains (default 20)
+//	tail [-from-start] P    follow a dnsmasq log file and ingest 'forwarded' events
 package main
 
 import (
@@ -14,11 +15,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
+	"github.com/belotserkovtsev/split-engine/internal/dnsmasq"
 	"github.com/belotserkovtsev/split-engine/internal/prober"
 	"github.com/belotserkovtsev/split-engine/internal/storage"
+	"github.com/belotserkovtsev/split-engine/internal/tail"
 	"github.com/belotserkovtsev/split-engine/internal/watcher"
 )
 
@@ -28,7 +33,8 @@ commands:
   init-db
   probe <domain>
   observe <domain> [peer]
-  list [N]`)
+  list [N]
+  tail [-from-start] <logfile>`)
 }
 
 func main() {
@@ -42,7 +48,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	store, err := storage.Open(*dbPath)
 	if err != nil {
 		fatal("open db: %v", err)
@@ -64,7 +72,6 @@ func main() {
 		if err := prober.Validate(domain); err != nil {
 			fatal("%v", err)
 		}
-		// Ensure the domain row exists so last_probe_id has somewhere to land.
 		if err := store.UpsertDomain(ctx, domain, "", time.Time{}); err != nil {
 			fatal("upsert: %v", err)
 		}
@@ -108,8 +115,71 @@ func main() {
 				d.Domain, d.State, d.HitCount, d.PeerCount, d.LastSeenAt)
 		}
 
+	case "tail":
+		tailCmd(ctx, store, args[1:])
+
 	default:
 		fatal("unknown command: %s", args[0])
+	}
+}
+
+func tailCmd(ctx context.Context, store *storage.Store, rest []string) {
+	fs := flag.NewFlagSet("tail", flag.ExitOnError)
+	fromStart := fs.Bool("from-start", false, "process whole file from the beginning (default: skip existing content)")
+	_ = fs.Parse(rest)
+	if fs.NArg() < 1 {
+		fatal("tail: missing logfile")
+	}
+	path := fs.Arg(0)
+
+	lines, errs := tail.Follow(ctx, path, tail.Options{StartAtEnd: !*fromStart})
+
+	ingested, skipped := 0, 0
+	report := time.NewTicker(10 * time.Second)
+	defer report.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(os.Stderr, "tail: stopped (ingested=%d skipped=%d)\n", ingested, skipped)
+			return
+		case err, ok := <-errs:
+			if ok && err != nil {
+				fatal("tail: %v", err)
+			}
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			ev, parsed := dnsmasq.Parse(line)
+			if !parsed {
+				skipped++
+				continue
+			}
+			// We count one observation per client query, not per upstream
+			// forwarding (which may fire multiple times for the same request).
+			// AAAA queries observe the same domain as A queries — count both;
+			// the dedupe lives at the domain level.
+			if ev.Action != dnsmasq.Query {
+				skipped++
+				continue
+			}
+			// Gateway's own queries (10.10.0.1) are infrastructure noise.
+			if ev.Peer == "" || ev.Peer == "10.10.0.1" {
+				skipped++
+				continue
+			}
+			if _, err := watcher.Ingest(ctx, store, watcher.Event{
+				Domain: ev.Domain,
+				Peer:   ev.Peer,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "ingest %q: %v\n", ev.Domain, err)
+				continue
+			}
+			ingested++
+		case <-report.C:
+			fmt.Fprintf(os.Stderr, "tail: ingested=%d skipped=%d\n", ingested, skipped)
+		}
 	}
 }
 
