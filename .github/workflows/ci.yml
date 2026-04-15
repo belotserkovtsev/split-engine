@@ -32,7 +32,7 @@ jobs:
           fi
 
   unit:
-    name: 🧪 unit + race
+    name: 🧪 unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,8 +49,8 @@ jobs:
         # channel / semaphore / goroutine mistakes cheaply.
         run: go test -race -short ./...
 
-  e2e:
-    name: 🔌 end-to-end pipeline
+  performance:
+    name: ⚡ performance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
