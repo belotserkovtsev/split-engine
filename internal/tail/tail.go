@@ -44,6 +44,14 @@ func Follow(ctx context.Context, path string, opts Options) (<-chan string, <-ch
 			curIno   uint64
 			lastStat time.Time
 		)
+		// Make sure the file handle is released on goroutine exit —
+		// otherwise on Windows a later os.Remove of the file path fails
+		// because the handle is still held.
+		defer func() {
+			if f != nil {
+				f.Close()
+			}
+		}()
 
 		openFile := func() error {
 			if f != nil {
