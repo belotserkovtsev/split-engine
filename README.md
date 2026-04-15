@@ -5,7 +5,7 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/belotserkovtsev/ladon)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![Ladon](assets/logo.jpg)
+![Ladon](assets/logo-wide.jpg)
 
 **Автоматический split-tunneling для VPN-шлюзов в сетях с DPI**
 
