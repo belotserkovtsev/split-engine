@@ -144,6 +144,45 @@ type Domain struct {
 	LastProbeID   *int64
 }
 
+// UpsertDNSObservation records that `ip` was seen as an answer for `domain`.
+// If the (domain, ip) pair already exists, bumps hit_count and last_seen_at.
+func (s *Store) UpsertDNSObservation(ctx context.Context, domain, ip string, seenAt time.Time) error {
+	if seenAt.IsZero() {
+		seenAt = time.Now().UTC()
+	}
+	ts := formatTime(seenAt)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO dns_cache (domain, ip, first_seen_at, last_seen_at, hit_count)
+		VALUES (?, ?, ?, ?, 1)
+		ON CONFLICT(domain, ip) DO UPDATE SET
+		  last_seen_at = excluded.last_seen_at,
+		  hit_count = dns_cache.hit_count + 1
+	`, domain, ip, ts, ts)
+	return err
+}
+
+// LookupIPs returns the IPs recently observed for a domain, freshest first.
+func (s *Store) LookupIPs(ctx context.Context, domain string, freshSince time.Time) ([]string, error) {
+	ts := formatTime(freshSince)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT ip FROM dns_cache WHERE domain = ? AND last_seen_at >= ? ORDER BY last_seen_at DESC`,
+		domain, ts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return nil, err
+		}
+		out = append(out, ip)
+	}
+	return out, rows.Err()
+}
+
 // ListProbeCandidates returns domains that are ready for a probe — eligible
 // states, cooldown expired (or null). Ordered by oldest cooldown first, then
 // most-recent observations first.

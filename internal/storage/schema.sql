@@ -36,3 +36,18 @@ CREATE TABLE IF NOT EXISTS manual_entries (
     list_name TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Passive observation of upstream DNS replies: which IPs dnsmasq actually
+-- handed out for a domain. We don't overwrite, we accumulate — CDNs rotate
+-- IPs and we want the full set seen recently. (domain, ip) is unique; the
+-- last_seen_at column tells us how fresh an IP observation is.
+CREATE TABLE IF NOT EXISTS dns_cache (
+    domain TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (domain, ip)
+);
+CREATE INDEX IF NOT EXISTS idx_dns_cache_domain ON dns_cache(domain);
+CREATE INDEX IF NOT EXISTS idx_dns_cache_last_seen ON dns_cache(last_seen_at);

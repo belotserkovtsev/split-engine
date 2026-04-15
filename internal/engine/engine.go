@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"github.com/belotserkovtsev/split-engine/internal/decision"
@@ -88,22 +89,38 @@ func runTailer(ctx context.Context, store *storage.Store, cfg Config) error {
 				return nil
 			}
 			ev, parsed := dnsmasq.Parse(line)
-			if !parsed || ev.Action != dnsmasq.Query {
+			if !parsed {
 				skipped++
 				continue
 			}
-			if ev.Peer == "" || ev.Peer == cfg.IgnorePeer {
+			switch ev.Action {
+			case dnsmasq.Query:
+				if ev.Peer == "" || ev.Peer == cfg.IgnorePeer {
+					skipped++
+					continue
+				}
+				if _, err := watcher.Ingest(ctx, store, watcher.Event{
+					Domain: ev.Domain,
+					Peer:   ev.Peer,
+				}); err != nil {
+					log.Printf("ingest %q: %v", ev.Domain, err)
+					continue
+				}
+				ingested++
+			case dnsmasq.Reply:
+				// Target is the answer: an IP, <CNAME>, NODATA-IPv6, NXDOMAIN, etc.
+				// Only IPs go into dns_cache.
+				if net.ParseIP(ev.Target) == nil {
+					skipped++
+					continue
+				}
+				if err := store.UpsertDNSObservation(ctx, ev.Domain, ev.Target, time.Time{}); err != nil {
+					log.Printf("dns_cache %q→%s: %v", ev.Domain, ev.Target, err)
+					continue
+				}
+			default:
 				skipped++
-				continue
 			}
-			if _, err := watcher.Ingest(ctx, store, watcher.Event{
-				Domain: ev.Domain,
-				Peer:   ev.Peer,
-			}); err != nil {
-				log.Printf("ingest %q: %v", ev.Domain, err)
-				continue
-			}
-			ingested++
 		case <-report.C:
 			log.Printf("tailer: ingested=%d skipped=%d", ingested, skipped)
 		}
