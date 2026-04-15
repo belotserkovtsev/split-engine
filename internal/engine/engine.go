@@ -11,6 +11,7 @@ import (
 
 	"github.com/belotserkovtsev/split-engine/internal/decision"
 	"github.com/belotserkovtsev/split-engine/internal/dnsmasq"
+	"github.com/belotserkovtsev/split-engine/internal/ipset"
 	"github.com/belotserkovtsev/split-engine/internal/prober"
 	"github.com/belotserkovtsev/split-engine/internal/publisher"
 	"github.com/belotserkovtsev/split-engine/internal/storage"
@@ -30,6 +31,9 @@ type Config struct {
 	ExpiryInterval   time.Duration // hot_entries sweep cadence
 	PublishPath      string        // where to write the published domain set
 	PublishInterval  time.Duration // publisher cadence
+	IpsetName        string        // name of the ipset to reconcile (empty → disabled)
+	IpsetInterval    time.Duration // ipset reconcile cadence
+	DNSFreshness     time.Duration // how recent a dns_cache entry must be to ship IPs to ipset
 	IgnorePeer       string        // peer IP to skip (gateway self, etc.)
 }
 
@@ -45,18 +49,22 @@ func Defaults(logPath string) Config {
 		ExpiryInterval:  30 * time.Second,
 		PublishPath:     "state/published-domains.txt",
 		PublishInterval: 10 * time.Second,
+		IpsetName:       "prod",
+		IpsetInterval:   5 * time.Second,
+		DNSFreshness:    6 * time.Hour,
 		IgnorePeer:      "10.10.0.1",
 	}
 }
 
 // Run starts all pipeline stages and blocks until ctx is cancelled.
 func Run(ctx context.Context, store *storage.Store, cfg Config) error {
-	errCh := make(chan error, 4)
+	errCh := make(chan error, 5)
 
 	go func() { errCh <- runTailer(ctx, store, cfg) }()
 	go func() { errCh <- runProbeWorker(ctx, store, cfg) }()
 	go func() { errCh <- runExpirySweeper(ctx, store, cfg) }()
 	go func() { errCh <- runPublisher(ctx, store, cfg) }()
+	go func() { errCh <- runIpsetSyncer(ctx, store, cfg) }()
 
 	<-ctx.Done()
 	// Drain one error if any stage exited early with an actual error.
@@ -247,6 +255,75 @@ func runPublisher(ctx context.Context, store *storage.Store, cfg Config) error {
 			return nil
 		case <-ticker.C:
 			publishNow()
+		}
+	}
+}
+
+// runIpsetSyncer keeps the gateway-side ipset (e.g. "prod") in sync with
+// hot_entries ∪ (later) cache ∪ manual. Each tick: read live hot domains →
+// expand to IPs via dns_cache → reconcile set membership.
+func runIpsetSyncer(ctx context.Context, store *storage.Store, cfg Config) error {
+	if cfg.IpsetName == "" {
+		return nil
+	}
+	mgr := ipset.New(cfg.IpsetName)
+
+	// Don't bother starting if the set doesn't exist — this is an operator
+	// concern and silently creating a set could mask misconfiguration.
+	ok, err := mgr.Exists(ctx)
+	if err != nil {
+		log.Printf("ipset exists check %q: %v", cfg.IpsetName, err)
+		return nil
+	}
+	if !ok {
+		log.Printf("ipset %q not found — skipping ipset syncer; create it with `ipset create %s hash:ip`", cfg.IpsetName, cfg.IpsetName)
+		return nil
+	}
+
+	ticker := time.NewTicker(cfg.IpsetInterval)
+	defer ticker.Stop()
+
+	syncNow := func() {
+		now := time.Now().UTC()
+		freshSince := now.Add(-cfg.DNSFreshness)
+
+		hots, err := store.ListHotEntries(ctx, now)
+		if err != nil {
+			log.Printf("ipset: list hot: %v", err)
+			return
+		}
+		desired := map[string]struct{}{}
+		for _, d := range hots {
+			ips, err := store.LookupIPs(ctx, d, freshSince)
+			if err != nil {
+				log.Printf("ipset: lookup ips %q: %v", d, err)
+				continue
+			}
+			for _, ip := range ips {
+				desired[ip] = struct{}{}
+			}
+		}
+		list := make([]string, 0, len(desired))
+		for ip := range desired {
+			list = append(list, ip)
+		}
+		added, removed, err := mgr.Reconcile(ctx, list)
+		if err != nil {
+			log.Printf("ipset reconcile: %v", err)
+			return
+		}
+		if added > 0 || removed > 0 {
+			log.Printf("ipset %s: +%d -%d (total %d)", cfg.IpsetName, added, removed, len(list))
+		}
+	}
+	syncNow()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			syncNow()
 		}
 	}
 }
