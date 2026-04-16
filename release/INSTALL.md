@@ -19,6 +19,8 @@ curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/ins
 **Что скрипт НЕ делает:** не трогает iptables / ip rule / routing tables.
 Это зона ответственности оператора — только ты знаешь какой у тебя tunnel-интерфейс, fwmark-схема, peer-subnet и т.д. Ладон просто наполняет ipset'ы; куда направлять трафик при попадании destination IP в эти ipset'ы — твой выбор. Скрипт в конце печатает example для типичного WireGuard split-tunnel сетапа.
 
+**Обновление:** тот же `install.sh` повторно. Скрипт идемпотентен: подтянет latest-версию с GitHub, перезапишет бинарь / systemd-unit / extensions, **сохранит** `config.yaml` и `manual-{allow,deny}.txt`, перезапустит ladon. Подходит и для первой установки и для апгрейда.
+
 Удаление:
 
 ```bash

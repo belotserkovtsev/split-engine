@@ -11,6 +11,10 @@
 # This script DOES NOT touch iptables — it prints an example at the end so
 # you can copy-paste-adjust.
 #
+# Re-running this script upgrades to the latest version: existing config
+# files are preserved (manual-allow.txt, manual-deny.txt, config.yaml),
+# binary + unit + extensions are replaced, ladon is restarted.
+#
 # Usage:
 #   sudo bash install.sh
 #
@@ -134,10 +138,14 @@ log "initializing database"
 "$LADON_PREFIX/ladon" -db "$LADON_PREFIX/state/engine.db" init-db >/dev/null
 
 # --- step 9: reload + start ---
-log "reloading systemd, restarting dnsmasq, starting ladon"
+# `restart` instead of `start` so re-running this script serves as an
+# upgrade: a fresh install starts, an existing one is replaced — picking
+# up the new binary and any unit / drop-in changes in one shot.
+log "reloading systemd, restarting dnsmasq, starting/restarting ladon"
 systemctl daemon-reload
 systemctl restart dnsmasq
-systemctl enable --now ladon >/dev/null
+systemctl enable ladon >/dev/null
+systemctl restart ladon
 
 sleep 1
 if ! systemctl is-active --quiet ladon; then
