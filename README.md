@@ -276,6 +276,28 @@ ladon -db <path> [-config <path>] run [-from-start] [-manual-allow <path>] [-man
 
 Пути (`-manual-allow`, `-manual-deny`) перебивают одноимённые поля YAML, если заданы оба. Тонкие knobs задаются только через файл.
 
+### Extensions — преднастроенные allow-списки
+
+С релизом ладона шипаются тематические подборки доменов, которые часто хочется завернуть в туннель целиком (AI-сервисы, стримы и т.п.). Подключаются опционально по имени:
+
+```yaml
+extensions:
+  - ai
+  - twitch
+# extensions_path: /opt/ladon/extensions   # default
+```
+
+Семантика — то же что у `manual-allow.txt`: домены всегда попадают в `prod` ipset (через туннель), минуя probe-пайплайн. Probe (даже с exit-compare) **не может выкинуть** extension-домен из ipset — manual-allow всегда в union ipset-syncer'а. IP-адреса добавляются в ipset как только клиент их разрешит через dnsmasq (proactive resolve мы не делаем).
+
+Доступные пресеты:
+
+| Имя | Покрытие |
+|---|---|
+| `ai` | OpenAI / ChatGPT, Anthropic / Claude (8 доменов) |
+| `twitch` | twitch.tv + CDN (5 доменов) |
+
+Полный список — в `/opt/ladon/extensions/<name>.txt`. Свои подборки можно положить в тот же каталог (или в `extensions_path` куда угодно) и подключить в config так же по имени.
+
 ### Очистка состояния — `ladon prune`
 
 Иногда нужно сбросить накопленные данные руками — например, после смены логики probe (включили exit-compare, и cache мог содержать FP, которые новая логика отсеяла бы), или просто отрезать старую историю проб для размера БД.

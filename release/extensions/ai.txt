@@ -1,0 +1,21 @@
+# ladon extension: AI services
+#
+# Подключается через config.yaml:
+#   extensions: [ai]
+#
+# Семантика — то же что manual-allow: домены всегда попадают в ipset prod
+# (т.е. через туннель), минуя probe-пайплайн. Удобно для сервисов,
+# которые блокируются на TLS/HTTP-уровне или гео-ограничены — где локальная
+# проба может ошибочно сказать «работает».
+
+# OpenAI / ChatGPT
+openai.com
+chatgpt.com
+oaiusercontent.com
+openaicom.imgix.net
+oaistatic.com
+
+# Anthropic / Claude
+anthropic.com
+claude.com
+claude.ai

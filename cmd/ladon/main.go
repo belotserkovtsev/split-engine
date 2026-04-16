@@ -390,6 +390,12 @@ func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f.IgnorePeer != "" {
 		cfg.IgnorePeer = f.IgnorePeer
 	}
+	if len(f.Extensions) > 0 {
+		cfg.Extensions = f.Extensions
+	}
+	if f.ExtensionsPath != "" {
+		cfg.ExtensionsPath = f.ExtensionsPath
+	}
 	cfg.LocalProber = f.BuildLocalProber(cfg.ProbeTimeout)
 	cfg.RemoteProber = f.BuildRemoteProber()
 }

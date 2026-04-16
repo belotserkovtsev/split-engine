@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,6 +46,13 @@ type Config struct {
 	ManualDenyPath         string        // optional path to manual deny list file
 	IgnorePeer             string        // peer IP to skip (gateway self, etc.)
 
+	// Extensions are bundled allow-list presets (e.g. "ai", "twitch") that
+	// ship with ladon and are opt-in by name. Each name resolves to
+	// ExtensionsPath/<name>.txt, which is loaded with the same parser as
+	// ManualAllowPath. See release/extensions/ for the shipped presets.
+	Extensions     []string
+	ExtensionsPath string // default "extensions" (relative to WorkingDirectory)
+
 	// LocalProber is the always-on baseline. Used by the inline fast-path from
 	// the tailer (where remote round-trips would blow the sub-second latency
 	// budget) and as the first stage of the batch worker. Defaults to NewLocal.
@@ -61,6 +70,7 @@ type Config struct {
 func Defaults(logPath string) Config {
 	return Config{
 		LogPath:                logPath,
+		ExtensionsPath:         "extensions",
 		ProbeInterval:          2 * time.Second,
 		ProbeBatch:             4,
 		ProbeTimeout:           800 * time.Millisecond,
@@ -101,6 +111,22 @@ func Run(ctx context.Context, store *storage.Store, cfg Config) error {
 		log.Printf("manual deny load: %v", err)
 	} else if n > 0 {
 		log.Printf("manual deny: loaded %d entries from %s", n, cfg.ManualDenyPath)
+	}
+	// Extensions — same parser, same destination as manual-allow. A missing
+	// extension file is treated as a real error (operator explicitly opted in,
+	// shouldn't silently get nothing).
+	for _, name := range cfg.Extensions {
+		path := filepath.Join(cfg.ExtensionsPath, name+".txt")
+		if _, err := os.Stat(path); err != nil {
+			log.Printf("extension %q: file not found at %s — check extensions_path", name, path)
+			continue
+		}
+		n, err := manual.Load(ctx, store, path, "allow")
+		if err != nil {
+			log.Printf("extension %q load: %v", name, err)
+			continue
+		}
+		log.Printf("extension %s: loaded %d entries from %s", name, n, path)
 	}
 
 	// Inline probe semaphore caps concurrent fast-path probes from the tailer.

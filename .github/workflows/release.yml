@@ -41,10 +41,13 @@ jobs:
           cp release/config.yaml.example      "${STAGE}/"
           cp release/INSTALL.md               "${STAGE}/"
           cp README.md                        "${STAGE}/"
+          cp -r release/extensions            "${STAGE}/"
 
           tar -czf "dist/ladon-linux-${ARCH}.tar.gz" -C dist "ladon-linux-${ARCH}-${TAG}"
-          sha256sum "dist/ladon-linux-${ARCH}.tar.gz" \
-            > "dist/ladon-linux-${ARCH}.tar.gz.sha256"
+          # sha256 file must contain the bare filename so `sha256sum -c` works
+          # when the user downloads the tarball into an arbitrary directory.
+          (cd dist && sha256sum "ladon-linux-${ARCH}.tar.gz" \
+            > "ladon-linux-${ARCH}.tar.gz.sha256")
 
       - name: upload artifact
         uses: actions/upload-artifact@v4

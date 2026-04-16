@@ -43,6 +43,12 @@ install -m 0755 ladon             /opt/ladon/ladon
 install -m 0644 ladon.service     /etc/systemd/system/
 install -m 0644 manual-allow.txt.example /etc/ladon/manual-allow.txt
 install -m 0644 manual-deny.txt.example  /etc/ladon/manual-deny.txt
+
+# Extensions — преднастроенные allow-списки (ai, twitch, ...). Опциональны,
+# подключаются по имени через config.yaml. См. extensions/README.md.
+install -d /opt/ladon/extensions
+install -m 0644 extensions/*.txt /opt/ladon/extensions/
+install -m 0644 extensions/README.md /opt/ladon/extensions/
 ```
 
 ## 3. Подготовка netfilter
