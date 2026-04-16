@@ -80,6 +80,30 @@ systemctl enable netfilter-persistent
 
 **Почему два ipset'а:** `ladon_engine` — динамический, ладон периодически пересоздаёт его на основе hot/cache → reconcile удаляет лишнее. `ladon_manual` — populated dnsmasq'ом синхронно при резолве через `ipset=/domain/ladon_manual` директивы, которые ладон записывает в `/etc/dnsmasq.d/ladon-manual.conf`. Если бы они были одним ipset'ом, ладон при reconcile удалял бы IP-шки которые добавил dnsmasq и про которые ладон не знает. Timeout=86400 на `ladon_manual` — естественная эвикция стейл-IP'шек, dnsmasq refresh'ит timeout при каждом резолве.
 
+### Capability для dnsmasq (обязательно)
+
+Стандартный пакетный dnsmasq запускается под пользователем `dnsmasq` (а не root) и **по умолчанию не имеет `CAP_NET_ADMIN`** — без этой capability он не может добавлять записи в kernel ipset, даже если `ipset=/domain/set` директивы прописаны. Симптом: dnsmasq резолвит, отвечает клиенту, но `ladon_manual` остаётся пустым, и трафик идёт direct.
+
+Лечится systemd drop-in'ом:
+
+```bash
+sudo install -d /etc/systemd/system/dnsmasq.service.d
+sudo tee /etc/systemd/system/dnsmasq.service.d/ladon-ipset.conf > /dev/null <<'EOF'
+[Service]
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETFCAP CAP_SETPCAP CAP_SYS_CHROOT CAP_KILL
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart dnsmasq
+```
+
+Проверить что заработало:
+```bash
+dig @127.0.0.1 +short openai.com
+sudo ipset list ladon_manual | tail -10
+# ↳ должны появиться IP-шки CloudFlare с timeout
+```
+
 Подробная схема iptables/ip-rule для cascading gateway (замени `tun0` на
 имя твоего upstream-интерфейса):
 
