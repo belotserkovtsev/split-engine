@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/belotserkovtsev/ladon/internal/decision"
@@ -287,12 +288,19 @@ func probeDomain(ctx context.Context, store *storage.Store, cfg Config, domain s
 	if useExitCompare && verdict == decision.Hot && cfg.RemoteProber != nil {
 		rres := cfg.RemoteProber.Probe(ctx, domain, ips)
 		persistProbe(ctx, store, rres)
-		if rres.TCPOK && rres.TLSOK {
+		switch {
+		case rres.TCPOK && rres.TLSOK:
 			// Real DPI block: direct path dead, exit confirms target is alive.
 			hotReason = "local:" + reasonFromProbe(res) + "|remote:ok"
-		} else {
-			// Methodological FP: both paths fail (port wrong, dead server,
-			// geofence on both). Override verdict.
+		case isRemoteTransportFailure(rres):
+			// Remote prober itself unreachable / timed out / returned non-200.
+			// Treat as "no opinion" — never let an outage of the operator's
+			// probe-server cascade into Ignore-ing real DPI blocks. Stick with
+			// the local Hot verdict.
+			hotReason = "local:" + reasonFromProbe(res) + "|remote:unavailable:" + reasonFromProbe(rres)
+		default:
+			// Both probers reported a real failure: methodological FP (port
+			// wrong, dead server, geofence on both vantage points).
 			verdict = decision.Ignore
 			hotReason = "local:" + reasonFromProbe(res) + "|remote:" + reasonFromProbe(rres)
 		}
@@ -363,6 +371,14 @@ func reasonFromProbe(r prober.Result) string {
 		return r.FailureReason
 	}
 	return "ok"
+}
+
+// isRemoteTransportFailure reports whether a remote prober result represents
+// the prober itself being unreachable (network error, timeout, non-200) rather
+// than a real verdict from a working remote. RemoteProber.Probe prefixes those
+// reasons with "remote:" — see internal/prober/remote.go failedRemote.
+func isRemoteTransportFailure(r prober.Result) bool {
+	return strings.HasPrefix(r.FailureReason, "remote:")
 }
 
 func runPublisher(ctx context.Context, store *storage.Store, cfg Config) error {

@@ -119,6 +119,49 @@ func TestExitCompare_RemoteFailOverrulesLocalHot(t *testing.T) {
 	}
 }
 
+// TestExitCompare_RemoteTransportFailureKeepsHot is the safety case: when
+// the operator's remote prober is itself unreachable (network error, timeout,
+// non-200), we must NOT treat that as a remote-FAIL signal — otherwise a
+// proxy outage would silently start un-tunneling real DPI blocks. Stick with
+// the local Hot verdict; reason gets a 'remote:unavailable:' marker.
+func TestExitCompare_RemoteTransportFailureKeepsHot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uses live local probe")
+	}
+	dir := t.TempDir()
+	s, err := storage.Open(filepath.Join(dir, "engine.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := s.UpsertDNSObservation(ctx, "blocked.test", unreachableIP, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.UpsertDomain(ctx, "blocked.test", "", time.Time{}); err != nil {
+		t.Fatalf("upsert dom: %v", err)
+	}
+
+	cfg := Defaults("/dev/null")
+	cfg.ProbeTimeout = 200 * time.Millisecond
+	cfg.LocalProber = prober.NewLocal(cfg.ProbeTimeout)
+	// Point at a port no one listens on — RemoteProber returns
+	// FailureReason="remote:dial tcp 127.0.0.1:1: connect: connection refused"
+	cfg.RemoteProber = prober.NewRemote("http://127.0.0.1:1", "", "", 200*time.Millisecond)
+
+	trigger := make(chan struct{}, 1)
+	probeDomain(ctx, s, cfg, "blocked.test", trigger, true)
+
+	hots, _ := s.ListHotEntries(ctx, time.Now().UTC())
+	if len(hots) != 1 || hots[0] != "blocked.test" {
+		t.Fatalf("want hot=[blocked.test], got %v — remote transport failure must NOT override Hot", hots)
+	}
+}
+
 // TestExitCompare_InlinePathSkipsRemote ensures the inline fast-path never
 // hits the remote prober even when one is configured. Wired by passing
 // useExitCompare=false; this test asserts that contract by giving the remote
