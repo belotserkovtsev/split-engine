@@ -1,18 +1,19 @@
+<div align="center">
+
+![Ladon](assets/logo-wide.jpg)
+
 # 🩸 Ladon
+
+**Автоматический split-tunneling для VPN-шлюзов в сетях с DPI**
 
 [![CI](https://github.com/belotserkovtsev/ladon/actions/workflows/ci.yml/badge.svg)](https://github.com/belotserkovtsev/ladon/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/belotserkovtsev/ladon?include_prereleases&sort=semver)](https://github.com/belotserkovtsev/ladon/releases)
 [![Go](https://img.shields.io/github/go-mod/go-version/belotserkovtsev/ladon)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![Ladon](assets/logo-wide.jpg)
+</div>
 
-**Автоматический split-tunneling для VPN-шлюзов в сетях с DPI**
-
-Ladon наблюдает трафик клиентов шлюза, проверяет домены на достижимость
-напрямую и строит список того, что нужно пустить через VPN, а остальное
-оставить идти прямо через провайдера. Ничего не нужно размечать руками —
-движок учится сам на поведении пира и реакции сети.
+Ladon наблюдает трафик клиентов шлюза, проверяет домены на достижимость и строит список из ip-адресов, которые нужно пустить через VPN. **За доли секунды**. Ничего не нужно размечать руками — движок учится сам на поведении пира и реакции сети.
 
 Задуман для WireGuard-шлюзов с `dnsmasq` и апстрим-туннелем наружу,
 но легко адаптируется под любой стек с fwmark-routing и ipset.
