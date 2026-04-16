@@ -473,6 +473,19 @@ func (s *Store) ExpireHotEntries(ctx context.Context, now time.Time) (int64, err
 	return res.RowsAffected()
 }
 
+// DeleteHotEntry removes one row by domain. Used when a fresher probe overrules
+// an earlier Hot verdict (e.g. exit-compare validator says the local fail was
+// methodological — domain shouldn't sit in ipset for 24h on a stale opinion).
+// Returns true if a row was deleted.
+func (s *Store) DeleteHotEntry(ctx context.Context, domain string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM hot_entries WHERE domain = ?`, domain)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func (s *Store) ListRecentDomains(ctx context.Context, limit int) ([]Domain, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT domain, COALESCE(etld_plus_one, ''), COALESCE(first_seen_at, ''),

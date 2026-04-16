@@ -240,11 +240,11 @@ func runCmd(ctx context.Context, store *storage.Store, configPath string, rest [
 }
 
 // applyConfigFile overlays YAML values on top of the engine defaults and
-// builds the probe backend. Zero values in the YAML leave defaults untouched —
+// builds the probe backends. Zero values in the YAML leave defaults untouched —
 // the operator only needs to list the knobs they actually want to change.
 func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f == nil {
-		cfg.Prober = prober.NewLocal(cfg.ProbeTimeout)
+		cfg.LocalProber = prober.NewLocal(cfg.ProbeTimeout)
 		return
 	}
 	if f.ManualAllow != "" && cfg.ManualAllowPath == "" {
@@ -298,7 +298,8 @@ func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f.IgnorePeer != "" {
 		cfg.IgnorePeer = f.IgnorePeer
 	}
-	cfg.Prober = f.BuildProber(cfg.ProbeTimeout)
+	cfg.LocalProber = f.BuildLocalProber(cfg.ProbeTimeout)
+	cfg.RemoteProber = f.BuildRemoteProber()
 }
 
 func toStorageResult(r prober.Result) storage.ProbeResult {

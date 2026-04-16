@@ -234,7 +234,7 @@ manual_allow: /etc/ladon/manual-allow.txt
 manual_deny: /etc/ladon/manual-deny.txt
 
 probe:
-  mode: local         # local | remote
+  mode: local         # local | exit-compare
   timeout: 800ms
   cooldown: 5m
   concurrency: 8
@@ -276,13 +276,15 @@ ladon -db <path> [-config <path>] run [-from-start] [-manual-allow <path>] [-man
 
 Пути (`-manual-allow`, `-manual-deny`) перебивают одноимённые поля YAML, если заданы оба. Тонкие knobs задаются только через файл.
 
-### Внешний пробинг-сервер (remote mode)
+### Exit-compare через внешний пробинг-сервер
 
-Можно делегировать пробы внешнему HTTP-сервису — полезно, когда надо измерять доступность не с самого шлюза, а с другой точки: residential ISP, 4G-модем, офшорная VPS и т.п.
+Локальная проба видит мир глазами шлюза. Это хорошо ловит DPI-блоки, которые цепляются ровно к тому пути, по которому идёт клиент. Но даёт ложные срабатывания, когда сам домен не отвечает на :443 — `imap.gmail.com` живёт на :993, `bgp.he.net` на 8080, и т.д. Локальный probe в таких случаях видит «TCP fail» и тащит домен в hot, хотя блока нет.
+
+`mode: exit-compare` решает это, добавляя вторую точку зрения: HTTP-сервер на твоей стороне, который пробит тот же домен из другого vantage point (residential ISP, 4G-модем, офшорная VPS, что угодно).
 
 ```yaml
 probe:
-  mode: remote
+  mode: exit-compare
   remote:
     url: https://my-probe-server.example.com/probe
     timeout: 2s
@@ -290,7 +292,17 @@ probe:
     auth_value: Bearer mysecrettoken
 ```
 
-HTTP-контракт простой: ладон шлёт POST с доменом и IP, сервер возвращает JSON с вердиктом. Формат описан в [`docs/probe-api.md`](docs/probe-api.md), референсная имплементация на Go — в [`examples/probe-server/`](examples/probe-server/).
+Логика вердикта на batch-перепробе:
+
+| local | remote | вердикт |
+|---|---|---|
+| OK | (не запускается) | Ignore — direct работает |
+| FAIL | OK | **Hot** — настоящий DPI-блок, snaружи домен живой |
+| FAIL | FAIL | **Ignore** — methodological FP (порт не тот / мёртвый сервер / domain не отвечает ниоткуда) |
+
+Inline fast-path всегда использует только локальную пробу — гонять remote round-trip на каждом первом запросе клиента сломало бы 0.5-секундный бюджет. Если inline ошибся — batch-перепроба с exit-compare его поправит и удалит запись из ipset.
+
+HTTP-контракт описан в [`docs/probe-api.md`](docs/probe-api.md), референсная имплементация на Go — в [`examples/probe-server/`](examples/probe-server/).
 
 ---
 

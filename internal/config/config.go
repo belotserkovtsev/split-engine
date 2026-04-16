@@ -37,8 +37,16 @@ type File struct {
 }
 
 // ProbeSection covers both the shared probe tuning and the backend selector.
+//
+// Modes:
+//   - "local" (default): only the gateway-side TCP+TLS probe runs. What
+//     ladon shipped with from v0.1.0 onward.
+//   - "exit-compare": the gateway-side probe still runs as the baseline (and
+//     remains the inline fast-path), and an additional remote HTTP probe
+//     validates Hot verdicts. local FAIL + remote OK = real DPI block;
+//     local FAIL + remote FAIL = methodological FP, suppressed.
 type ProbeSection struct {
-	Mode        string        `yaml:"mode"` // "local" (default) | "remote"
+	Mode        string        `yaml:"mode"` // "local" (default) | "exit-compare"
 	Timeout     time.Duration `yaml:"timeout"`
 	Cooldown    time.Duration `yaml:"cooldown"`
 	Concurrency int           `yaml:"concurrency"`
@@ -94,24 +102,29 @@ func Load(path string) (*File, error) {
 // missing one. Most fields are allowed to be empty — Defaults fill them in.
 func (f *File) Validate() error {
 	switch f.Probe.Mode {
-	case "", "local", "remote":
+	case "", "local", "exit-compare":
 		// ok
 	default:
-		return fmt.Errorf("probe.mode: unknown %q (want local|remote)", f.Probe.Mode)
+		return fmt.Errorf("probe.mode: unknown %q (want local|exit-compare)", f.Probe.Mode)
 	}
-	if f.Probe.Mode == "remote" && f.Probe.Remote.URL == "" {
+	if f.Probe.Mode == "exit-compare" && f.Probe.Remote.URL == "" {
 		return prober.ErrEmptyURL
 	}
 	return nil
 }
 
-// BuildProber returns the configured Prober. Safe to call with a nil receiver —
-// returns the built-in local prober with default timeout. The probeTimeout
-// argument is the resolved engine-level timeout (config takes precedence, CLI
-// fallback, then package default), so we pass it in here rather than guessing.
-func (f *File) BuildProber(probeTimeout time.Duration) prober.Prober {
-	if f == nil || f.Probe.Mode == "" || f.Probe.Mode == "local" {
-		return prober.NewLocal(probeTimeout)
+// BuildLocalProber returns the always-on local backend used by the inline
+// fast-path and as the batch worker baseline. Safe to call on a nil receiver.
+func (f *File) BuildLocalProber(probeTimeout time.Duration) prober.Prober {
+	return prober.NewLocal(probeTimeout)
+}
+
+// BuildRemoteProber returns the optional exit-compare validator, or nil when
+// remote isn't configured. The engine treats nil as "no exit-compare, just use
+// the local result" — so callers don't need to check the mode separately.
+func (f *File) BuildRemoteProber() prober.Prober {
+	if f == nil || f.Probe.Mode != "exit-compare" {
+		return nil
 	}
 	return prober.NewRemote(
 		f.Probe.Remote.URL,

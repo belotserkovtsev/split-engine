@@ -24,16 +24,18 @@ func TestLoad_DefaultsAreOK(t *testing.T) {
 	if f.Probe.Mode != "" {
 		t.Errorf("default mode = %q, want empty (→ local)", f.Probe.Mode)
 	}
-	p := f.BuildProber(500 * time.Millisecond)
-	if p.Name() != "local" {
-		t.Errorf("default prober = %q, want local", p.Name())
+	if name := f.BuildLocalProber(500 * time.Millisecond).Name(); name != "local" {
+		t.Errorf("local prober = %q, want local", name)
+	}
+	if rp := f.BuildRemoteProber(); rp != nil {
+		t.Errorf("remote prober = %v, want nil for default mode", rp)
 	}
 }
 
-func TestLoad_RemoteMode(t *testing.T) {
+func TestLoad_ExitCompareMode(t *testing.T) {
 	yaml := `
 probe:
-  mode: remote
+  mode: exit-compare
   remote:
     url: https://probe.example.com/v1/probe
     timeout: 2s
@@ -45,8 +47,8 @@ probe:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if f.Probe.Mode != "remote" {
-		t.Errorf("mode = %q, want remote", f.Probe.Mode)
+	if f.Probe.Mode != "exit-compare" {
+		t.Errorf("mode = %q, want exit-compare", f.Probe.Mode)
 	}
 	if f.Probe.Remote.URL != "https://probe.example.com/v1/probe" {
 		t.Errorf("url = %q", f.Probe.Remote.URL)
@@ -54,21 +56,23 @@ probe:
 	if f.Probe.Remote.Timeout != 2*time.Second {
 		t.Errorf("timeout = %v, want 2s", f.Probe.Remote.Timeout)
 	}
-	p := f.BuildProber(500 * time.Millisecond)
-	if p.Name() != "remote" {
-		t.Errorf("prober = %q, want remote", p.Name())
+	if name := f.BuildLocalProber(500 * time.Millisecond).Name(); name != "local" {
+		t.Errorf("local prober = %q, want local even in exit-compare", name)
+	}
+	if name := f.BuildRemoteProber().Name(); name != "remote" {
+		t.Errorf("remote prober = %q, want remote", name)
 	}
 }
 
-func TestLoad_RemoteModeWithoutURL(t *testing.T) {
+func TestLoad_ExitCompareWithoutURL(t *testing.T) {
 	yaml := `
 probe:
-  mode: remote
+  mode: exit-compare
 `
 	path := writeTemp(t, yaml)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected validation error for remote without url")
+		t.Fatal("expected validation error for exit-compare without url")
 	}
 }
 

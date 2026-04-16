@@ -15,14 +15,16 @@
 # --- probe backend ---
 
 probe:
-  mode: local          # local (default) | remote
+  mode: local          # local (default) | exit-compare
   timeout: 800ms       # TCP/TLS dial timeout
   cooldown: 5m         # минимальный интервал между probe одного домена
   concurrency: 8       # семафор для inline-probe из tailer
   # interval: 2s       # как часто ходит batch probe-worker
   # batch: 4           # сколько кандидатов за тик
 
-  # --- работает только при mode: remote ---
+  # --- exit-compare: добавляет remote-валидатор поверх локальной пробы ---
+  # local FAIL + remote OK = Hot (real block); local FAIL + remote FAIL = Ignore (FP).
+  # Inline fast-path всегда только локальный — remote только в batch.
   # remote:
   #   url: https://my-probe-server.example.com/probe
   #   timeout: 2s

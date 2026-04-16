@@ -1,13 +1,14 @@
 # probe-server (reference implementation)
 
 Минимальный HTTP-сервер, реализующий контракт, которого ожидает ладон в режиме
-`probe.mode: remote`. Делает ровно то же самое, что встроенный `LocalProber`
-(TCP:443 → TLS-SNI без проверки сертификата), но удалённо.
+`probe.mode: exit-compare`. Делает ровно то же самое, что встроенный
+`LocalProber` (TCP:443 → TLS-SNI без проверки сертификата), но удалённо.
 
 Смысл: показать формат запроса/ответа. Подмени функцию `probe()` в `main.go`
-на свою логику — и получаешь проб-сервер, который ладон опрашивает. Реальные
-use-case'ы: Raspberry Pi за residential ISP, 4G-модем, headless-браузер,
-что угодно ещё, где имеет смысл измерять доступность не с gateway'я.
+на свою логику — и получаешь проб-сервер, который ладон опрашивает как
+exit-compare валидатор. Реальные use-case'ы: Raspberry Pi за residential ISP,
+4G-модем, headless-браузер, что угодно ещё, где имеет смысл измерять
+доступность не с gateway'я.
 
 ## Сборка и запуск
 
@@ -52,7 +53,7 @@ curl -X POST http://localhost:8080/probe \
 
 ```yaml
 probe:
-  mode: remote
+  mode: exit-compare
   remote:
     url: http://<probe-server-host>:8080/probe
     timeout: 2s
