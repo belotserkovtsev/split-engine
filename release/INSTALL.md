@@ -1,7 +1,45 @@
 # Установка ladon
 
-Пошаговая инструкция для Linux-гейта с WireGuard-подсетью пиров, dnsmasq,
-fwmark-based routing через туннель наружу (stun0 / wg1 / hysteria / etc.).
+## TL;DR — установка одной командой (Debian/Ubuntu)
+
+```bash
+curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/install.sh \
+  | sudo PEER_SUBNET=10.10.0.0/16 bash
+```
+
+`PEER_SUBNET` — обязательный параметр, диапазон WG-пиров чей трафик нужно
+маркировать. `/16` — все пиры подсети, `/32` — конкретный пир (например
+`10.10.0.2/32`).
+
+Скрипт сам:
+- определит архитектуру (amd64/arm64) и скачает последнюю версию + проверит sha256;
+- поставит зависимости (`ipset`, `iptables-persistent`, `sqlite3`, `dnsmasq`);
+- разложит бинарь, systemd-unit, конфиги и extensions в `/opt/ladon` и `/etc/ladon`;
+- создаст ipset'ы `ladon_engine` + `ladon_manual` с правильными опциями;
+- добавит iptables-правила в `WG_ROUTE` (идемпотентно, повторный запуск безопасен);
+- установит CAP_NET_ADMIN drop-in для dnsmasq (нужно для нативных `ipset=` директив);
+- инициализирует БД, перезапустит dnsmasq и запустит ladon;
+- напечатает чеклист «что дальше» (как добавить домены, включить extensions, exit-compare).
+
+Удаление: тот же `uninstall.sh` с тем же `PEER_SUBNET`.
+
+```bash
+curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/uninstall.sh \
+  | sudo PEER_SUBNET=10.10.0.0/16 bash
+```
+
+Дополнительные опциональные env-переменные (для нестандартных сетапов):
+`FWMARK`, `IPSET_ENGINE`, `IPSET_MANUAL`, `WG_ROUTE_CHAIN`, `LADON_PREFIX`,
+`LADON_CONFIG_DIR` — посмотри их в [`install.sh`](install.sh) (они есть в коде с дефолтами).
+
+---
+
+## Установка вручную
+
+Если хочешь понимать что происходит, или у тебя нестандартный сетап — ниже
+пошаговая версия того же что делает `install.sh`. Поддерживается Debian/Ubuntu
+с WireGuard, dnsmasq и fwmark-based routing через туннель наружу
+(stun0 / wg1 / hysteria / etc.).
 
 ## 1. Зависимости
 

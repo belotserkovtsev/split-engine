@@ -187,8 +187,27 @@ flowchart TB
 
 ### Quickstart
 
+Одной командой (Debian/Ubuntu):
+
 ```bash
-# 1. Скачать последний релиз (или зафиксировать версию: TAG=v0.2.0)
+curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/install.sh \
+  | sudo PEER_SUBNET=10.10.0.0/16 bash
+```
+
+Скрипт сам скачает последнюю версию, поставит зависимости, создаст ipset'ы,
+впишет iptables-правила, настроит dnsmasq и запустит ladon. `PEER_SUBNET` —
+обязательный параметр, диапазон WG-пиров чей трафик нужно маркировать
+(`/16` — все, `/32` — конкретный пир). Удаление: `uninstall.sh` с тем же
+`PEER_SUBNET`.
+
+Для пошаговой ручной установки или нестандартного сетапа — см.
+[release/INSTALL.md](release/INSTALL.md).
+
+<details>
+<summary>Старый ручной quickstart (если хочешь понимать каждый шаг)</summary>
+
+```bash
+# 1. Скачать последний релиз
 TAG=$(curl -sSL "https://api.github.com/repos/belotserkovtsev/ladon/releases/latest" \
   | grep '"tag_name":' | head -1 | cut -d'"' -f4)
 curl -L "https://github.com/belotserkovtsev/ladon/releases/download/${TAG}/ladon-linux-amd64.tar.gz" \
@@ -201,10 +220,13 @@ sudo mkdir -p /opt/ladon/state /etc/ladon
 sudo cp /opt/ladon/manual-allow.txt.example /etc/ladon/manual-allow.txt
 sudo cp /opt/ladon/manual-deny.txt.example  /etc/ladon/manual-deny.txt
 
-# 3. Создать ipset и правило в iptables mangle
-sudo ipset create prod hash:ip family inet maxelem 65536
-sudo iptables -t mangle -A WG_ROUTE -m set --match-set prod dst \
-  -j MARK --set-mark 0x1
+# 3. Два ipset'а и iptables-правила
+sudo ipset create ladon_engine hash:ip family inet maxelem 65536
+sudo ipset create ladon_manual hash:ip family inet maxelem 65536 timeout 86400
+sudo iptables -t mangle -A WG_ROUTE -s 10.10.0.2/32 \
+  -m set --match-set ladon_engine dst -j MARK --set-mark 0x1
+sudo iptables -t mangle -A WG_ROUTE -s 10.10.0.2/32 \
+  -m set --match-set ladon_manual dst -j MARK --set-mark 0x1
 sudo ipset save > /etc/iptables/ipsets   # чтобы переживало reboot
 
 # 4. Инициализировать БД и поставить сервис
@@ -219,6 +241,8 @@ sudo systemctl enable --now ladon
 systemctl status ladon
 journalctl -u ladon -f
 ```
+
+</details>
 
 Подробнее — см. [release/INSTALL.md](release/INSTALL.md).
 
