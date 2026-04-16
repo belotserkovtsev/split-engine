@@ -139,4 +139,3 @@ func mustObserve(t *testing.T, s *storage.Store, domain, ip string, now time.Tim
 		t.Fatalf("observe %s: %v", domain, err)
 	}
 }
-

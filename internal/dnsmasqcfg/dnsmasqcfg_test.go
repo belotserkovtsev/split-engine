@@ -28,8 +28,8 @@ func TestWriteFormatAndDedup(t *testing.T) {
 	path := filepath.Join(dir, "ladon-manual.conf")
 	if err := writeTo(path, "ladon_manual", []string{
 		"openai.com",
-		"OPENAI.COM",   // case-insensitive dedup
-		"openai.com.",  // trailing dot dedup
+		"OPENAI.COM",    // case-insensitive dedup
+		"openai.com.",   // trailing dot dedup
 		"  openai.com ", // whitespace dedup
 		"twitch.tv",
 		"",

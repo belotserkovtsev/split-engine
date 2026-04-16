@@ -23,6 +23,9 @@
 #     | sudo bash
 #
 # Optional env:
+#   TAG=v0.4.0-rc1          install a specific release tag instead of latest
+#                           (useful for testing pre-releases — `releases/latest`
+#                           in the GH API skips prereleases by default)
 #   IPSET_ENGINE=ladon_engine, IPSET_MANUAL=ladon_manual
 #   LADON_PREFIX=/opt/ladon, LADON_CONFIG_DIR=/etc/ladon
 
@@ -66,12 +69,17 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq ipset sqlite3 dnsmasq >/dev/null
 
-# --- step 2: fetch latest release ---
-log "querying latest release"
-TAG=$(curl -fsSL "https://api.github.com/repos/${GH_REPO}/releases/latest" \
-  | grep '"tag_name":' | head -1 | cut -d'"' -f4)
-[[ -n "$TAG" ]] || die "couldn't determine latest tag from GitHub API"
-log "latest version: $TAG"
+# --- step 2: fetch release tag ---
+TAG="${TAG:-}"
+if [[ -z "$TAG" ]]; then
+  log "querying latest stable release"
+  TAG=$(curl -fsSL "https://api.github.com/repos/${GH_REPO}/releases/latest" \
+    | grep '"tag_name":' | head -1 | cut -d'"' -f4)
+  [[ -n "$TAG" ]] || die "couldn't determine latest tag from GitHub API"
+  log "latest version: $TAG"
+else
+  log "using TAG override: $TAG"
+fi
 
 WORKDIR=$(mktemp -d)
 trap "rm -rf '$WORKDIR'" EXIT
