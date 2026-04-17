@@ -418,7 +418,7 @@ func probeDomain(ctx context.Context, store *storage.Store, cfg Config, domain s
 
 	// Phase 1: local probe (always). This is the gateway-side view; if it says
 	// the destination is reachable, no exit comparison can change that.
-	res := cfg.LocalProber.Probe(ctx, domain, ips)
+	res := cfg.LocalProber.Probe(ctx, prober.ProbeRequest{Domain: domain, IPs: ips})
 	persistProbe(ctx, store, res)
 	verdict := decision.Classify(res)
 	hotReason := reasonFromProbe(res)
@@ -428,7 +428,7 @@ func probeDomain(ctx context.Context, store *storage.Store, cfg Config, domain s
 	// never veto a local OK; if the gateway can reach it, no need to tunnel),
 	// and the bandwidth-cheapest filter for the operator's remote server.
 	if useExitCompare && verdict == decision.Hot && cfg.RemoteProber != nil {
-		rres := cfg.RemoteProber.Probe(ctx, domain, ips)
+		rres := cfg.RemoteProber.Probe(ctx, prober.ProbeRequest{Domain: domain, IPs: ips})
 		persistProbe(ctx, store, rres)
 		switch {
 		case rres.TCPOK && rres.TLSOK:

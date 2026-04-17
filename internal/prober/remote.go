@@ -71,13 +71,29 @@ func (p *RemoteProber) Name() string { return "remote" }
 // FailureReason="remote:<err>" and TCP/TLS both false, matching how the local
 // prober reports its own transport failures — the engine treats it as Hot,
 // which is the safe default when we can't reach our own probe service.
-func (p *RemoteProber) Probe(ctx context.Context, domain string, ips []string) Result {
+//
+// Non-"tcp+tls" Proto values are rejected at the client side: the wire
+// contract (docs/probe-api.md) doesn't yet carry a proto field, so probing
+// QUIC/STUN through a legacy probe-server would silently test TCP instead.
+// When v1.0 extends the contract the check here loosens accordingly.
+func (p *RemoteProber) Probe(ctx context.Context, pr ProbeRequest) Result {
+	pr = pr.ApplyDefaults()
 	started := time.Now()
+	if pr.Proto != "tcp+tls" {
+		return Result{
+			Domain:        pr.Domain,
+			ResolvedIPs:   pr.IPs,
+			FailureReason: "remote:unsupported_proto:" + pr.Proto,
+			LatencyMS:     int(time.Since(started) / time.Millisecond),
+		}
+	}
+	domain := pr.Domain
+	ips := pr.IPs
 	req := RemoteRequest{
 		Domain: domain,
 		IPs:    ips,
-		Port:   443,
-		SNI:    domain,
+		Port:   pr.Port,
+		SNI:    pr.SNI,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
