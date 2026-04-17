@@ -11,13 +11,8 @@
 
 ```yaml
 allow_extensions: [ai, twitch, tiktok]
-deny_extensions:  [ru-direct]
+deny_extensions:  [ru]
 ```
-
-> **Совместимость.** Ключ `extensions:` был переименован в
-> `allow_extensions:` для симметрии с `deny_extensions:`. Старый ключ пока
-> работает (Load мигрирует значение и печатает warning в журнал), но будет
-> удалён в v0.6. Мигрировать — просто замена имени ключа в YAML.
 
 ## Пресеты
 
@@ -26,7 +21,7 @@ deny_extensions:  [ru-direct]
 | `ai` | allow | OpenAI / ChatGPT, Anthropic / Claude |
 | `twitch` | allow | Стриминг (twitch.tv + CDN-домены) |
 | `tiktok` | allow | TikTok / ByteDance overseas (core, regional CDN, backbone, SDK) |
-| `ru-direct` | deny | RU-порталы и госсервисы, которым оффшорный VPN не нужен / вреден |
+| `ru` | deny | RU-порталы и госсервисы, которым оффшорный VPN не нужен / вреден |
 
 ## Семантика
 
@@ -44,7 +39,7 @@ dnsmasq's native `ipset=` directive. Эффект:
 грузят домены в `manual_entries` с `list_name='deny'`:
 
 - tailer пропускает их (skip-at-ingest), в `domains` table не попадают.
-- probe-worker исключает их из `ListProbeCandidates` (v0.4.1+).
+- probe-worker исключает их из `ListProbeCandidates`.
 - `ladon prune` вычищает любые ранее накопленные denied rows через
   `DeleteDeniedDomains`.
 - Фильтр срабатывает по точному домену ИЛИ по eTLD+1: `mail.ru` в списке
@@ -90,7 +85,7 @@ ladon отклонит при старте: домен, который и в all
    journalctl -u ladon -n 20 | grep extension
    # ожидается:
    #   allow extension ai: 8 domains from /opt/ladon/extensions/ai.txt
-   #   deny extension ru-direct: 4 domains from /opt/ladon/extensions/ru-direct.txt
+   #   deny extension ru: 4 domains from /opt/ladon/extensions/ru.txt
    ```
 
 5. Для allow — проверьте, что ipset наполнился после резолва:
@@ -107,7 +102,7 @@ ladon отклонит при старте: домен, который и в all
 
 ```yaml
 allow_extensions: [ai, twitch, my-vpn-only]
-deny_extensions:  [corp-internal, ru-direct]
+deny_extensions:  [corp-internal, ru]
 ```
 
 Альтернатива — обычные `/etc/ladon/manual-allow.txt` и

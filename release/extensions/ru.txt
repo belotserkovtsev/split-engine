@@ -1,7 +1,7 @@
 # ladon deny extension: RU-сервисы, которым туннель не нужен
 #
 # Подключается через config.yaml:
-#   deny_extensions: [ru-direct]
+#   deny_extensions: [ru]
 #
 # Домены из этого списка engine пропускает в tailer (ingest-time skip),
 # probe-worker их не трогает, в hot/cache не попадают. Ровно как

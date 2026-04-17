@@ -10,7 +10,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -40,14 +39,7 @@ type File struct {
 	// name resolves to <ExtensionsPath>/<name>.txt and is loaded with the
 	// same parser as ManualAllow.
 	AllowExtensions []string `yaml:"allow_extensions"`
-
-	// Extensions is the deprecated alias for AllowExtensions. Accepted for
-	// backward compatibility with configs written before the deny_extensions
-	// knob existed; Load() merges it into AllowExtensions and emits a
-	// deprecation warning. Remove after v0.6.0.
-	Extensions []string `yaml:"extensions"`
-
-	ExtensionsPath string `yaml:"extensions_path"`
+	ExtensionsPath  string   `yaml:"extensions_path"`
 
 	// DenyExtensions are bundled deny-list presets. Shares ExtensionsPath
 	// with AllowExtensions — the same file pool, just a different intent.
@@ -113,18 +105,6 @@ func Load(path string) (*File, error) {
 	var f File
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
-	}
-	// Deprecated `extensions:` key merges into the canonical
-	// `allow_extensions:`; operator sees a warning in the log and should
-	// migrate the YAML. Rejecting both-keys-set avoids ambiguity about
-	// which list wins.
-	if len(f.Extensions) > 0 {
-		if len(f.AllowExtensions) > 0 {
-			return nil, fmt.Errorf("config %q: set either 'allow_extensions' or 'extensions' (deprecated), not both", path)
-		}
-		log.Printf("config %q: 'extensions' key is deprecated, rename to 'allow_extensions' (support will be removed in v0.6)", path)
-		f.AllowExtensions = f.Extensions
-		f.Extensions = nil
 	}
 	if err := f.Validate(); err != nil {
 		return nil, fmt.Errorf("config %q: %w", path, err)

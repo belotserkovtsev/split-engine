@@ -24,40 +24,6 @@ extensions_path: /opt/ladon/extensions
 	}
 }
 
-// TestLoad_DeprecatedExtensionsKey verifies the backward-compat path: a
-// config written against the pre-rename `extensions:` key still loads. Load
-// merges the value into AllowExtensions and emits a deprecation warning.
-func TestLoad_DeprecatedExtensionsKey(t *testing.T) {
-	yaml := `
-extensions:
-  - ai
-  - twitch
-`
-	path := writeTemp(t, yaml)
-	f, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(f.AllowExtensions) != 2 || f.AllowExtensions[0] != "ai" || f.AllowExtensions[1] != "twitch" {
-		t.Errorf("allow_extensions = %v, want values migrated from deprecated 'extensions'", f.AllowExtensions)
-	}
-	if len(f.Extensions) != 0 {
-		t.Errorf("Extensions should be cleared after migration, got %v", f.Extensions)
-	}
-}
-
-func TestLoad_RejectsBothExtensionKeys(t *testing.T) {
-	yaml := `
-extensions:       [old]
-allow_extensions: [new]
-`
-	path := writeTemp(t, yaml)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatalf("Load accepted both 'extensions' and 'allow_extensions' — want error")
-	}
-}
-
 func TestLoad_ExtensionsDefaultsAreEmpty(t *testing.T) {
 	path := writeTemp(t, "---\n")
 	f, err := Load(path)
@@ -75,7 +41,7 @@ func TestLoad_ExtensionsDefaultsAreEmpty(t *testing.T) {
 func TestLoad_DenyExtensions(t *testing.T) {
 	yaml := `
 deny_extensions:
-  - ru-direct
+  - ru
   - corp
 extensions_path: /opt/ladon/extensions
 `
@@ -84,8 +50,8 @@ extensions_path: /opt/ladon/extensions
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(f.DenyExtensions) != 2 || f.DenyExtensions[0] != "ru-direct" || f.DenyExtensions[1] != "corp" {
-		t.Errorf("deny_extensions = %v, want [ru-direct corp]", f.DenyExtensions)
+	if len(f.DenyExtensions) != 2 || f.DenyExtensions[0] != "ru" || f.DenyExtensions[1] != "corp" {
+		t.Errorf("deny_extensions = %v, want [ru corp]", f.DenyExtensions)
 	}
 }
 

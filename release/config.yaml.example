@@ -20,10 +20,8 @@
 #   - twitch
 #   - tiktok
 # deny_extensions:
-#   - ru-direct
+#   - ru
 # extensions_path: /opt/ladon/extensions   # default
-# Note: старый ключ `extensions:` всё ещё принимается как alias для
-# `allow_extensions:` (будет удалён в v0.6) — ladon напишет warning в журнал.
 
 probe:
   mode: local          # local (default) | exit-compare
