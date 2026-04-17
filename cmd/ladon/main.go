@@ -411,6 +411,14 @@ func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f.ExtensionsPath != "" {
 		cfg.ExtensionsPath = f.ExtensionsPath
 	}
+	cfg.Observer.Enabled = f.Observer.Enabled
+	cfg.Observer.LocalSubnet = f.Observer.LocalSubnet
+	if f.Observer.DedupTTL > 0 {
+		cfg.Observer.DedupTTL = f.Observer.DedupTTL
+	}
+	if f.Observer.GCInterval > 0 {
+		cfg.Observer.GCInterval = f.Observer.GCInterval
+	}
 	cfg.LocalProber = f.BuildLocalProber(cfg.ProbeTimeout)
 	cfg.RemoteProber = f.BuildRemoteProber()
 }

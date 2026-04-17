@@ -18,6 +18,7 @@ import (
 	"github.com/belotserkovtsev/ladon/internal/etld"
 	"github.com/belotserkovtsev/ladon/internal/ipset"
 	"github.com/belotserkovtsev/ladon/internal/manual"
+	"github.com/belotserkovtsev/ladon/internal/observer"
 	"github.com/belotserkovtsev/ladon/internal/prober"
 	"github.com/belotserkovtsev/ladon/internal/publisher"
 	"github.com/belotserkovtsev/ladon/internal/scorer"
@@ -125,6 +126,10 @@ type Config struct {
 	// as ManualDenyPath, so tailer skip and probe-worker filter both honor it.
 	DenyExtensions []string
 
+	// Observer enables the conntrack-based flow observer. When off, the
+	// goroutine never starts; behavior identical to pre-v1.0 ladon.
+	Observer observer.Config
+
 	// LocalProber is the always-on baseline. Used by the inline fast-path from
 	// the tailer (where remote round-trips would blow the sub-second latency
 	// budget) and as the first stage of the batch worker. Defaults to NewLocal.
@@ -215,7 +220,7 @@ func Run(ctx context.Context, store *storage.Store, cfg Config) error {
 	// a single buffered slot coalesces storms of hot events into one sync pass.
 	ipsetTrigger := make(chan struct{}, 1)
 
-	errCh := make(chan error, 6)
+	errCh := make(chan error, 7)
 
 	go func() { errCh <- runTailer(ctx, store, cfg, sem, ipsetTrigger) }()
 	go func() { errCh <- runProbeWorker(ctx, store, cfg, ipsetTrigger) }()
@@ -223,6 +228,14 @@ func Run(ctx context.Context, store *storage.Store, cfg Config) error {
 	go func() { errCh <- runPublisher(ctx, store, cfg) }()
 	go func() { errCh <- runIpsetSyncer(ctx, store, cfg, ipsetTrigger) }()
 	go func() { errCh <- scorer.Run(ctx, store, cfg.Scorer) }()
+	if cfg.Observer.Enabled {
+		obs, err := observer.New(cfg.Observer, store)
+		if err != nil {
+			log.Printf("observer: setup failed: %v — continuing without it", err)
+		} else {
+			go func() { errCh <- obs.Run(ctx) }()
+		}
+	}
 
 	<-ctx.Done()
 	select {

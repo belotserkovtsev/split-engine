@@ -47,6 +47,19 @@ type File struct {
 	// with the same parser as ManualDeny (into manual_entries with
 	// list_name='deny').
 	DenyExtensions []string `yaml:"deny_extensions"`
+
+	Observer ObserverSection `yaml:"observer"`
+}
+
+// ObserverSection configures the conntrack-based flow observer. Linux-only.
+// When disabled, ladon has no visibility into LAN-client connection attempts
+// beyond what dnsmasq logs. Enabling grants connect-side evidence that
+// complements resolve-side evidence and feeds future protocol-aware probes.
+type ObserverSection struct {
+	Enabled     bool          `yaml:"enabled"`
+	LocalSubnet string        `yaml:"local_subnet"` // e.g. "192.168.0.0/24"; empty = no filter
+	DedupTTL    time.Duration `yaml:"dedup_ttl"`    // default 60s
+	GCInterval  time.Duration `yaml:"gc_interval"`  // default 5m
 }
 
 // ProbeSection covers both the shared probe tuning and the backend selector.

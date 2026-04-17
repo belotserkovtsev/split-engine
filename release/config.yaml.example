@@ -69,3 +69,16 @@ dns_freshness: 6h      # возраст, после которого IP из dns
 # --- прочее ---
 
 # ignore_peer: 10.10.0.1   # peer, чьи DNS-запросы игнорируются (gateway self)
+
+# --- observer (Linux only, v1.0+): conntrack-based flow observation ---
+#
+# Подписка на nf_conntrack события — ладон видит куда реально коннектятся
+# LAN-клиенты (по протоколу, порту, IP), а не только какие домены резолвят.
+# Пишет в observed_flows таблицу. По умолчанию ВЫКЛЮЧЕНО — включай только
+# на Linux-гейтах с CAP_NET_ADMIN (установка из install.sh это даёт).
+#
+# observer:
+#   enabled: false
+#   local_subnet: 192.168.0.0/24   # фильтр по src IP; пусто = без фильтра
+#   dedup_ttl: 60s                 # окно подавления дубликатов 4-tuple
+#   gc_interval: 5m                # периодическая чистка dedup map'а
