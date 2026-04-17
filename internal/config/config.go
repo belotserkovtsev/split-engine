@@ -49,6 +49,20 @@ type File struct {
 	DenyExtensions []string `yaml:"deny_extensions"`
 
 	Observer ObserverSection `yaml:"observer"`
+	QUIC     QUICSection     `yaml:"quic"`
+}
+
+// QUICSection configures the optional QUIC handshake probe. Off by default.
+// When enabled, probe-worker picks domains where Observer has seen LAN
+// UDP:443 traffic and re-probes them on the QUIC-specific cooldown; results
+// go into the `probes` table alongside TCP+TLS probes with proto='quic'.
+// Classification (HOT/ignore changes) is a separate step; this section only
+// controls whether the probe runs and how often.
+type QUICSection struct {
+	Enabled  bool          `yaml:"enabled"`
+	Timeout  time.Duration `yaml:"timeout"`  // per-probe deadline; default 2s
+	Cooldown time.Duration `yaml:"cooldown"` // re-probe gate; default 1h
+	Batch    int           `yaml:"batch"`    // per-tick drain; 0 → probe.batch
 }
 
 // ObserverSection configures the conntrack-based flow observer. Linux-only.

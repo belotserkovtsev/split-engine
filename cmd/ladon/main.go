@@ -419,6 +419,15 @@ func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f.Observer.GCInterval > 0 {
 		cfg.Observer.GCInterval = f.Observer.GCInterval
 	}
+	if f.QUIC.Enabled {
+		cfg.QUICProber = prober.NewQUIC(f.QUIC.Timeout)
+	}
+	if f.QUIC.Cooldown > 0 {
+		cfg.QUICProbeCooldown = f.QUIC.Cooldown
+	}
+	if f.QUIC.Batch > 0 {
+		cfg.QUICProbeBatch = f.QUIC.Batch
+	}
 	cfg.LocalProber = f.BuildLocalProber(cfg.ProbeTimeout)
 	cfg.RemoteProber = f.BuildRemoteProber()
 }
@@ -427,6 +436,7 @@ func toStorageResult(r prober.Result) storage.ProbeResult {
 	dns, tcp, tls := r.DNSOK, r.TCPOK, r.TLSOK
 	return storage.ProbeResult{
 		Domain:        r.Domain,
+		Proto:         r.Proto,
 		DNSOK:         &dns,
 		TCPOK:         &tcp,
 		TLSOK:         &tls,

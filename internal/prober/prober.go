@@ -10,9 +10,13 @@ import (
 	"time"
 )
 
-// Result holds the outcome of a staged probe.
+// Result holds the outcome of a staged probe. TCPOK / TLSOK carry
+// "transport reachable" / "crypto handshake completed" semantics — these
+// apply cleanly to QUIC probes too (QUIC handshake is TLS 1.3 under the
+// hood), so we reuse the fields rather than forking the schema per protocol.
 type Result struct {
 	Domain        string
+	Proto         string // "tcp+tls" | "quic" | "stun"; empty = "tcp+tls" legacy
 	DNSOK         bool
 	TCPOK         bool
 	TLSOK         bool
@@ -36,7 +40,7 @@ func Probe(ctx context.Context, domain string, timeout time.Duration) Result {
 		timeout = DefaultTimeout
 	}
 	started := time.Now()
-	r := Result{Domain: domain}
+	r := Result{Domain: domain, Proto: "tcp+tls"}
 
 	resolver := &net.Resolver{}
 	addrs, err := resolver.LookupIPAddr(ctx, domain)
@@ -69,7 +73,7 @@ func ProbeIPs(ctx context.Context, domain string, ips []string, timeout time.Dur
 		timeout = DefaultTimeout
 	}
 	started := time.Now()
-	r := Result{Domain: domain, ResolvedIPs: ips}
+	r := Result{Domain: domain, Proto: "tcp+tls", ResolvedIPs: ips}
 	if len(ips) == 0 {
 		r.FailureReason = "no_ips"
 		r.LatencyMS = int(time.Since(started) / time.Millisecond)

@@ -141,6 +141,22 @@ type Config struct {
 	// remote FAIL = methodological FP (Ignore — port wrong, dead server,
 	// geofence on both vantage points). Inline path never uses this.
 	RemoteProber prober.Prober
+
+	// QUICProber performs the optional UDP:443 probe for domains where the
+	// Observer has seen LAN clients open UDP:443 flows. Nil disables QUIC
+	// probing entirely (Observer may still run, flows just aren't acted on).
+	// Probe results land in the `probes` table with proto='quic'; the HOT/
+	// ignore classification layer (step 6 in v1.0) consumes them.
+	QUICProber prober.Prober
+
+	// QUICProbeCooldown is the per-protocol re-probe gate for QUIC. Default
+	// 1h — QUIC path reachability changes slowly, repeated probing adds
+	// bandwidth without signal.
+	QUICProbeCooldown time.Duration
+
+	// QUICProbeBatch caps the number of QUIC candidates drained per tick.
+	// Default falls through to ProbeBatch.
+	QUICProbeBatch int
 }
 
 // Defaults returns a reasonable baseline config.
@@ -155,6 +171,7 @@ func Defaults(logPath string) Config {
 		InlineProbeConcurrency: 8,
 		HotTTL:                 24 * time.Hour,
 		ExpiryInterval:         30 * time.Second,
+		QUICProbeCooldown:      time.Hour,
 		PublishPath:            "state/published-domains.txt",
 		PublishInterval:        10 * time.Second,
 		IpsetName:              "ladon_engine",
@@ -396,7 +413,49 @@ func probeOnce(ctx context.Context, store *storage.Store, cfg Config, ipsetTrigg
 		// gives the operator's vantage point a vote on borderline calls.
 		probeDomain(ctx, store, cfg, d.Domain, ipsetTrigger, true)
 	}
+
+	// QUIC enrichment pass: for domains where the Observer has recorded LAN
+	// UDP:443 flows, run a QUIC handshake probe on its own cooldown. Results
+	// land in `probes` with proto='quic' for step 6 classification to read.
+	// Decision logic (hot/ignore) is NOT touched here — step 5 only collects
+	// data; promote/demote rules live in step 6.
+	if cfg.QUICProber != nil {
+		quicBatch := cfg.QUICProbeBatch
+		if quicBatch <= 0 {
+			quicBatch = cfg.ProbeBatch
+		}
+		quicCands, err := store.ListQUICCandidates(ctx, quicBatch, now, cfg.QUICProbeCooldown)
+		if err != nil {
+			log.Printf("quic candidates: %v", err)
+		}
+		for _, domain := range quicCands {
+			if err := ctx.Err(); err != nil {
+				return nil
+			}
+			probeDomainQUIC(ctx, store, cfg, domain)
+		}
+	}
 	return nil
+}
+
+// probeDomainQUIC runs a QUIC handshake probe and records the result. Unlike
+// probeDomain it does NOT touch domain state, hot_entries, or ipset trigger —
+// step 5's contract is "collect probe history", classification is step 6.
+func probeDomainQUIC(ctx context.Context, store *storage.Store, cfg Config, domain string) {
+	if err := prober.Validate(domain); err != nil {
+		return
+	}
+	freshSince := time.Now().UTC().Add(-cfg.DNSFreshness)
+	ips, err := store.LookupIPs(ctx, domain, freshSince)
+	if err != nil {
+		log.Printf("quic lookup ips %q: %v", domain, err)
+	}
+	res := cfg.QUICProber.Probe(ctx, prober.ProbeRequest{
+		Domain: domain,
+		IPs:    ips,
+		Proto:  "quic",
+	})
+	persistProbe(ctx, store, res)
 }
 
 // probeDomain runs one full probe→decision→persist cycle for a single domain.
@@ -496,6 +555,7 @@ func persistProbe(ctx context.Context, store *storage.Store, res prober.Result) 
 	dns, tcp, tls := res.DNSOK, res.TCPOK, res.TLSOK
 	if _, err := store.InsertProbe(ctx, storage.ProbeResult{
 		Domain:        res.Domain,
+		Proto:         res.Proto,
 		DNSOK:         &dns,
 		TCPOK:         &tcp,
 		TLSOK:         &tls,

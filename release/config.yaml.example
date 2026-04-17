@@ -70,6 +70,19 @@ dns_freshness: 6h      # возраст, после которого IP из dns
 
 # ignore_peer: 10.10.0.1   # peer, чьи DNS-запросы игнорируются (gateway self)
 
+# --- quic (v1.0+): handshake probe for UDP:443 reachability ---
+#
+# Off by default. When enabled, probe-worker picks domains where Observer
+# recorded LAN UDP:443 traffic and runs a QUIC Initial handshake — a
+# protocol-aware probe that closes ladon's UDP blind spot. Needs observer
+# populated first (i.e. enable observer in parallel).
+#
+# quic:
+#   enabled: false
+#   timeout: 2s      # per-probe deadline; UDP needs more than the 800ms TCP default
+#   cooldown: 1h     # QUIC reachability is sticky — hourly is plenty
+#   batch: 4         # per-tick drain; 0 falls through to probe.batch
+
 # --- observer (Linux only, v1.0+): conntrack-based flow observation ---
 #
 # Подписка на nf_conntrack события — ладон видит куда реально коннектятся

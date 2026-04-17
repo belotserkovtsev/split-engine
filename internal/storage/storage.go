@@ -146,6 +146,7 @@ func (s *Store) UpsertDomain(ctx context.Context, domain, peer string, seenAt ti
 // ProbeResult is the shape accepted by InsertProbe.
 type ProbeResult struct {
 	Domain        string
+	Proto         string // 'tcp+tls' (default) | 'quic' | 'stun'
 	DNSOK         *bool
 	TCPOK         *bool
 	TLSOK         *bool
@@ -161,6 +162,11 @@ func (s *Store) InsertProbe(ctx context.Context, r ProbeResult, createdAt time.T
 	}
 	ts := formatTime(createdAt)
 
+	proto := r.Proto
+	if proto == "" {
+		proto = "tcp+tls"
+	}
+
 	ips, err := json.Marshal(r.ResolvedIPs)
 	if err != nil {
 		return 0, err
@@ -174,11 +180,12 @@ func (s *Store) InsertProbe(ctx context.Context, r ProbeResult, createdAt time.T
 
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO probes (
-			domain, dns_ok, tcp_ok, tls_ok, http_ok,
+			domain, proto, dns_ok, tcp_ok, tls_ok, http_ok,
 			resolved_ips_json, failure_reason, latency_ms, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		r.Domain,
+		proto,
 		boolPtrToNullInt(r.DNSOK),
 		boolPtrToNullInt(r.TCPOK),
 		boolPtrToNullInt(r.TLSOK),

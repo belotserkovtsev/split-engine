@@ -58,6 +58,7 @@ func (p *QUICProber) Probe(ctx context.Context, req ProbeRequest) Result {
 	if req.Proto != "quic" {
 		return Result{
 			Domain:        req.Domain,
+			Proto:         "quic",
 			ResolvedIPs:   req.IPs,
 			FailureReason: "quic:unsupported_proto:" + req.Proto,
 		}
@@ -70,6 +71,7 @@ func (p *QUICProber) Probe(ctx context.Context, req ProbeRequest) Result {
 		if err != nil {
 			return Result{
 				Domain:        req.Domain,
+				Proto:         "quic",
 				FailureReason: "quic:dns:" + err.Error(),
 				LatencyMS:     latencyMS(started),
 			}
@@ -79,6 +81,7 @@ func (p *QUICProber) Probe(ctx context.Context, req ProbeRequest) Result {
 	if len(ips) == 0 {
 		return Result{
 			Domain:        req.Domain,
+			Proto:         "quic",
 			FailureReason: "quic:dns:no addresses",
 			LatencyMS:     latencyMS(started),
 		}
@@ -101,6 +104,7 @@ func (p *QUICProber) Probe(ctx context.Context, req ProbeRequest) Result {
 	if err != nil {
 		return Result{
 			Domain:        req.Domain,
+			Proto:         "quic",
 			DNSOK:         dnsOK,
 			ResolvedIPs:   ips,
 			FailureReason: "quic:" + err.Error(),
@@ -113,6 +117,7 @@ func (p *QUICProber) Probe(ctx context.Context, req ProbeRequest) Result {
 
 	return Result{
 		Domain:      req.Domain,
+		Proto:       "quic",
 		DNSOK:       dnsOK,
 		TCPOK:       true, // "transport ok" — UDP datagrams flowed + handshake confirmed
 		TLSOK:       true, // "crypto ok"    — QUIC handshake is TLS 1.3 under the hood

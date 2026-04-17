@@ -82,6 +82,7 @@ func (p *RemoteProber) Probe(ctx context.Context, pr ProbeRequest) Result {
 	if pr.Proto != "tcp+tls" {
 		return Result{
 			Domain:        pr.Domain,
+			Proto:         pr.Proto,
 			ResolvedIPs:   pr.IPs,
 			FailureReason: "remote:unsupported_proto:" + pr.Proto,
 			LatencyMS:     int(time.Since(started) / time.Millisecond),
@@ -139,6 +140,7 @@ func (p *RemoteProber) Probe(ctx context.Context, pr ProbeRequest) Result {
 	}
 	return Result{
 		Domain:        domain,
+		Proto:         "tcp+tls",
 		DNSOK:         rr.DNSOK,
 		TCPOK:         rr.TCPOK,
 		TLSOK:         rr.TLSOK,
@@ -151,6 +153,7 @@ func (p *RemoteProber) Probe(ctx context.Context, pr ProbeRequest) Result {
 func failedRemote(domain string, ips []string, reason string, started time.Time) Result {
 	return Result{
 		Domain:        domain,
+		Proto:         "tcp+tls",
 		ResolvedIPs:   ips,
 		FailureReason: reason,
 		LatencyMS:     int(time.Since(started) / time.Millisecond),

@@ -90,6 +90,7 @@ func (p *LocalProber) Probe(ctx context.Context, req ProbeRequest) Result {
 	if req.Proto != "tcp+tls" {
 		return Result{
 			Domain:        req.Domain,
+			Proto:         req.Proto,
 			ResolvedIPs:   req.IPs,
 			FailureReason: "local:unsupported_proto:" + req.Proto,
 		}
