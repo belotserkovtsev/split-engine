@@ -4,9 +4,9 @@ import (
 	"testing"
 )
 
-func TestLoad_Extensions(t *testing.T) {
+func TestLoad_AllowExtensions(t *testing.T) {
 	yaml := `
-extensions:
+allow_extensions:
   - ai
   - twitch
 extensions_path: /opt/ladon/extensions
@@ -16,11 +16,45 @@ extensions_path: /opt/ladon/extensions
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(f.Extensions) != 2 || f.Extensions[0] != "ai" || f.Extensions[1] != "twitch" {
-		t.Errorf("extensions = %v, want [ai twitch]", f.Extensions)
+	if len(f.AllowExtensions) != 2 || f.AllowExtensions[0] != "ai" || f.AllowExtensions[1] != "twitch" {
+		t.Errorf("allow_extensions = %v, want [ai twitch]", f.AllowExtensions)
 	}
 	if f.ExtensionsPath != "/opt/ladon/extensions" {
 		t.Errorf("extensions_path = %q", f.ExtensionsPath)
+	}
+}
+
+// TestLoad_DeprecatedExtensionsKey verifies the backward-compat path: a
+// config written against the pre-rename `extensions:` key still loads. Load
+// merges the value into AllowExtensions and emits a deprecation warning.
+func TestLoad_DeprecatedExtensionsKey(t *testing.T) {
+	yaml := `
+extensions:
+  - ai
+  - twitch
+`
+	path := writeTemp(t, yaml)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(f.AllowExtensions) != 2 || f.AllowExtensions[0] != "ai" || f.AllowExtensions[1] != "twitch" {
+		t.Errorf("allow_extensions = %v, want values migrated from deprecated 'extensions'", f.AllowExtensions)
+	}
+	if len(f.Extensions) != 0 {
+		t.Errorf("Extensions should be cleared after migration, got %v", f.Extensions)
+	}
+}
+
+func TestLoad_RejectsBothExtensionKeys(t *testing.T) {
+	yaml := `
+extensions:       [old]
+allow_extensions: [new]
+`
+	path := writeTemp(t, yaml)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatalf("Load accepted both 'extensions' and 'allow_extensions' — want error")
 	}
 }
 
@@ -30,8 +64,8 @@ func TestLoad_ExtensionsDefaultsAreEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(f.Extensions) != 0 {
-		t.Errorf("extensions = %v, want empty default", f.Extensions)
+	if len(f.AllowExtensions) != 0 {
+		t.Errorf("allow_extensions = %v, want empty default", f.AllowExtensions)
 	}
 	if f.ExtensionsPath != "" {
 		t.Errorf("extensions_path = %q, want empty default", f.ExtensionsPath)
@@ -57,7 +91,7 @@ extensions_path: /opt/ladon/extensions
 
 func TestLoad_RejectsOverlapBetweenAllowAndDeny(t *testing.T) {
 	yaml := `
-extensions:
+allow_extensions:
   - ai
   - shared
 deny_extensions:

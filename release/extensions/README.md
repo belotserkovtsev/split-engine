@@ -10,9 +10,14 @@
 Оба включаются опционально через `config.yaml`:
 
 ```yaml
-extensions:      [ai, twitch, tiktok]
-deny_extensions: [ru-direct]
+allow_extensions: [ai, twitch, tiktok]
+deny_extensions:  [ru-direct]
 ```
+
+> **Совместимость.** Ключ `extensions:` был переименован в
+> `allow_extensions:` для симметрии с `deny_extensions:`. Старый ключ пока
+> работает (Load мигрирует значение и печатает warning в журнал), но будет
+> удалён в v0.6. Мигрировать — просто замена имени ключа в YAML.
 
 ## Пресеты
 
@@ -20,13 +25,13 @@ deny_extensions: [ru-direct]
 |---|---|---|
 | `ai` | allow | OpenAI / ChatGPT, Anthropic / Claude |
 | `twitch` | allow | Стриминг (twitch.tv + CDN-домены) |
-| `tiktok` | allow | TikTok / ByteDance overseas (core, CDN, backbone, SDK) |
+| `tiktok` | allow | TikTok / ByteDance overseas (core, regional CDN, backbone, SDK) |
 | `ru-direct` | deny | RU-порталы и госсервисы, которым оффшорный VPN не нужен / вреден |
 
 ## Семантика
 
-**Allow-extensions** при старте ladon для каждого включённого имени читают
-`<extensions_path>/<name>.txt` и добавляют домены в manual-allow через
+**Allow-extensions** при старте ladon для каждого включённого имени читает
+`<extensions_path>/<name>.txt` и добавляет домены в manual-allow через
 dnsmasq's native `ipset=` directive. Эффект:
 
 - Домен всегда в ipset `ladon_manual` (минуя probe).
@@ -40,10 +45,18 @@ dnsmasq's native `ipset=` directive. Эффект:
 
 - tailer пропускает их (skip-at-ingest), в `domains` table не попадают.
 - probe-worker исключает их из `ListProbeCandidates` (v0.4.1+).
-- `prune` вычищает любые ранее накопленные denied rows через
+- `ladon prune` вычищает любые ранее накопленные denied rows через
   `DeleteDeniedDomains`.
 - Фильтр срабатывает по точному домену ИЛИ по eTLD+1: `mail.ru` в списке
   закроет `privacy-cs.mail.ru` без явной записи.
+
+### Что значит eTLD+1 раскрытие для allow
+
+Allow-extensions тоже разворачиваются по eTLD+1 — `openai.com` в файле
+превращается в `ipset=/openai.com/ladon_manual`, что у dnsmasq покрывает
+все поддомены сразу (`api.openai.com`, `cdn.openai.com` и т.д.). Поэтому
+в пресете достаточно перечислить регистрируемые домены — не надо
+руками раскатывать `*.cdn.service.com`.
 
 ## Где живут файлы
 
@@ -57,24 +70,56 @@ extensions_path: /etc/ladon/extensions
 
 ## Конфликт имён
 
-Преcет, указанный одновременно в `extensions` и `deny_extensions`, ladon
-отклонит при старте: домен, который и в allow, и в deny, — признак
+Пресет, указанный одновременно в `allow_extensions` и `deny_extensions`,
+ladon отклонит при старте: домен, который и в allow, и в deny, — признак
 операторской ошибки, а не полезный паттерн.
+
+## Как включить и проверить
+
+1. Отредактируйте `/etc/ladon/config.yaml`, добавьте имя пресета в
+   нужный список.
+2. Перезапустите ladon: `systemctl restart ladon`.
+3. **Для allow-extensions дополнительно:** `systemctl restart dnsmasq`.
+   `systemctl reload dnsmasq` (SIGHUP) **не** перечитывает `ipset=`
+   директивы — только полный restart. Ladon пишет
+   `/etc/dnsmasq.d/ladon-manual.conf` при каждом старте, но сам dnsmasq
+   не теребит.
+4. Убедитесь в журнале:
+
+   ```
+   journalctl -u ladon -n 20 | grep extension
+   # ожидается:
+   #   allow extension ai: 8 domains from /opt/ladon/extensions/ai.txt
+   #   deny extension ru-direct: 4 domains from /opt/ladon/extensions/ru-direct.txt
+   ```
+
+5. Для allow — проверьте, что ipset наполнился после резолва:
+
+   ```
+   nslookup <домен-из-пресета> <ladon-host>
+   ipset list ladon_manual | grep -c -vE 'timeout|Name|Type|Revision|Header|Size|References|Number|Members'
+   ```
 
 ## Свои списки
 
-Положите `extensions_path/<свое-имя>.txt` с тем же форматом (один домен
+Положите `<extensions_path>/<свое-имя>.txt` с тем же форматом (один домен
 на строку, `#` — комменты) и включите в config:
 
 ```yaml
-extensions:      [ai, twitch, my-vpn-only]
-deny_extensions: [corp-internal, ru-direct]
+allow_extensions: [ai, twitch, my-vpn-only]
+deny_extensions:  [corp-internal, ru-direct]
 ```
 
 Альтернатива — обычные `/etc/ladon/manual-allow.txt` и
 `/etc/ladon/manual-deny.txt`. Формат тот же. Разница только
 организационная: extensions удобно держать тематическими подборками,
 которые легко включать/выключать одной строкой в config.
+
+> **Переживёт ли кастомный пресет upgrade?** install.sh перезаписывает
+> `/opt/ladon/extensions/*.txt` из tarball'а при каждом запуске. Если вы
+> хотите сохранить кастомный файл между апгрейдами — держите его в
+> отдельном каталоге и укажите `extensions_path:` на него, или
+> отправьте PR чтобы заапстримить пресет в репозиторий.
 
 ## Формат файла
 

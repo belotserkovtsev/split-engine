@@ -73,18 +73,18 @@ func collectManualDomains(cfg Config) ([]string, error) {
 		}
 		add(ds)
 	}
-	for _, name := range cfg.Extensions {
+	for _, name := range cfg.AllowExtensions {
 		path := filepath.Join(cfg.ExtensionsPath, name+".txt")
 		if _, err := os.Stat(path); err != nil {
-			log.Printf("extension %q: file not found at %s — check extensions_path", name, path)
+			log.Printf("allow extension %q: file not found at %s — check extensions_path", name, path)
 			continue
 		}
 		ds, err := manual.ReadDomains(path)
 		if err != nil {
-			log.Printf("extension %q read: %v", name, err)
+			log.Printf("allow extension %q read: %v", name, err)
 			continue
 		}
-		log.Printf("extension %s: %d domains from %s", name, len(ds), path)
+		log.Printf("allow extension %s: %d domains from %s", name, len(ds), path)
 		add(ds)
 	}
 	return out, nil
@@ -112,12 +112,12 @@ type Config struct {
 	ManualDenyPath         string        // optional path to manual deny list file
 	IgnorePeer             string        // peer IP to skip (gateway self, etc.)
 
-	// Extensions are bundled allow-list presets (e.g. "ai", "twitch") that
-	// ship with ladon and are opt-in by name. Each name resolves to
+	// AllowExtensions are bundled allow-list presets (e.g. "ai", "twitch")
+	// that ship with ladon and are opt-in by name. Each name resolves to
 	// ExtensionsPath/<name>.txt, which is loaded with the same parser as
 	// ManualAllowPath. See release/extensions/ for the shipped presets.
-	Extensions     []string
-	ExtensionsPath string // default "extensions" (relative to WorkingDirectory)
+	AllowExtensions []string
+	ExtensionsPath  string // default "extensions" (relative to WorkingDirectory)
 
 	// DenyExtensions are bundled deny-list presets loaded from the same
 	// ExtensionsPath pool. Each name resolves to ExtensionsPath/<name>.txt

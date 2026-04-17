@@ -15,13 +15,15 @@
 # --- probe backend ---
 
 # Extensions — преднастроенные allow/deny-списки. См. /opt/ladon/extensions/README.md
-# extensions:
+# allow_extensions:
 #   - ai
 #   - twitch
 #   - tiktok
 # deny_extensions:
 #   - ru-direct
 # extensions_path: /opt/ladon/extensions   # default
+# Note: старый ключ `extensions:` всё ещё принимается как alias для
+# `allow_extensions:` (будет удалён в v0.6) — ladon напишет warning в журнал.
 
 probe:
   mode: local          # local (default) | exit-compare

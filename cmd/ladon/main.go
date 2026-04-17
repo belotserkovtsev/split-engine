@@ -402,8 +402,8 @@ func applyConfigFile(cfg *engine.Config, f *config.File) {
 	if f.IgnorePeer != "" {
 		cfg.IgnorePeer = f.IgnorePeer
 	}
-	if len(f.Extensions) > 0 {
-		cfg.Extensions = f.Extensions
+	if len(f.AllowExtensions) > 0 {
+		cfg.AllowExtensions = f.AllowExtensions
 	}
 	if len(f.DenyExtensions) > 0 {
 		cfg.DenyExtensions = f.DenyExtensions
