@@ -175,10 +175,10 @@ func TestListProbeCandidatesExcludesDenied(t *testing.T) {
 
 	// Seed domains table with several rows in probeable states.
 	for _, d := range []string{
-		"exact-deny.test",               // exact match with deny entry
-		"sub.whole-deny.test",           // matches deny via eTLD+1
-		"unrelated.test",                // should remain a candidate
-		"noise.allow-only.test",         // only on allow list
+		"exact-deny.test",       // exact match with deny entry
+		"sub.whole-deny.test",   // matches deny via eTLD+1
+		"unrelated.test",        // should remain a candidate
+		"noise.allow-only.test", // only on allow list
 	} {
 		if err := s.UpsertDomain(ctx, d, "", now); err != nil {
 			t.Fatalf("upsert %s: %v", d, err)
