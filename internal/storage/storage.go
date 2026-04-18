@@ -4,29 +4,128 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/belotserkovtsev/ladon/internal/etld"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
+// Store owns two *sql.DB handles pointing at the same SQLite file. SQLite has
+// one writer slot at the engine layer; funnelling all Go writes through a
+// single-connection pool (wdb) aligns our concurrency model with SQLite's
+// instead of relying on busy_timeout to absorb contention — an N-conn pool
+// under burst produces SQLITE_BUSY because any given writer can wait longer
+// than the timeout. Reads go through a default-sized pool (rdb) and overlap
+// naturally with the writer thanks to WAL's snapshot isolation: a reader sees
+// the last committed state without blocking on the writer or being blocked
+// by it.
 type Store struct {
-	db *sql.DB
+	rdb *sql.DB // read pool: default sizing, WAL readers run concurrently with the writer
+	wdb *sql.DB // write pool: capped at one conn so all writes serialize in Go
 }
 
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+// perConnPragmas runs on every new connection either pool opens.
+// journal_mode=WAL is database-level (lives in the file header) so we set it
+// via the DSN once; the pragmas here are per-connection and must be applied
+// on each fresh conn.
+var perConnPragmas = []string{
+	`PRAGMA busy_timeout = 5000`,
+	`PRAGMA foreign_keys = ON`,
+}
+
+// dsnConnector adapts modernc.org/sqlite's driver.Driver (which does not
+// implement driver.DriverContext) to the driver.Connector interface that
+// sql.OpenDB needs.
+type dsnConnector struct {
+	drv driver.Driver
+	dsn string
+}
+
+func (c *dsnConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return c.drv.Open(c.dsn)
+}
+
+func (c *dsnConnector) Driver() driver.Driver { return c.drv }
+
+// pragmaConnector wraps a driver.Connector and runs the PRAGMAs on each new
+// connection before handing it to the pool.
+type pragmaConnector struct {
+	base    driver.Connector
+	pragmas []string
+}
+
+func (p *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := p.base.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	execer, ok := conn.(driver.ExecerContext)
+	if !ok {
+		conn.Close()
+		return nil, errors.New("storage: driver.Conn does not implement ExecerContext")
+	}
+	for _, stmt := range p.pragmas {
+		if _, err := execer.ExecContext(ctx, stmt, nil); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("storage: apply %q: %w", stmt, err)
+		}
+	}
+	return conn, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (p *pragmaConnector) Driver() driver.Driver { return p.base.Driver() }
+
+// openPool builds one *sql.DB wrapped by the pragma connector, pinging eagerly
+// so a misconfigured driver or PRAGMA fails at startup rather than first query.
+func openPool(path string) (*sql.DB, error) {
+	connector := &pragmaConnector{
+		base: &dsnConnector{
+			drv: &sqlite.Driver{},
+			dsn: path + "?_pragma=journal_mode(WAL)",
+		},
+		pragmas: perConnPragmas,
+	}
+	db := sql.OpenDB(connector)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func Open(path string) (*Store, error) {
+	rdb, err := openPool(path)
+	if err != nil {
+		return nil, err
+	}
+	wdb, err := openPool(path)
+	if err != nil {
+		rdb.Close()
+		return nil, err
+	}
+	// Cap the write pool at one connection. All calls routed through wdb
+	// serialize in Go via sql.DB's internal queue; SQLite never sees two
+	// Go connections competing for the writer slot, so SQLITE_BUSY becomes
+	// structurally impossible rather than timeout-dependent.
+	wdb.SetMaxOpenConns(1)
+	return &Store{rdb: rdb, wdb: wdb}, nil
+}
+
+func (s *Store) Close() error {
+	werr := s.wdb.Close()
+	rerr := s.rdb.Close()
+	if werr != nil {
+		return werr
+	}
+	return rerr
+}
 
 func (s *Store) Init(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, schemaSQL); err != nil {
+	if _, err := s.wdb.ExecContext(ctx, schemaSQL); err != nil {
 		return err
 	}
 	// Backfill etld_plus_one for any rows that pre-date the column population.
@@ -37,7 +136,7 @@ func (s *Store) Init(ctx context.Context) error {
 // BackfillETLDPlusOne fills etld_plus_one for rows where it is NULL or empty.
 // Returns the number of rows updated.
 func (s *Store) BackfillETLDPlusOne(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.wdb.QueryContext(ctx,
 		`SELECT domain FROM domains WHERE etld_plus_one IS NULL OR etld_plus_one = ''`)
 	if err != nil {
 		return 0, err
@@ -55,7 +154,7 @@ func (s *Store) BackfillETLDPlusOne(ctx context.Context) (int, error) {
 
 	updated := 0
 	for _, d := range todo {
-		if _, err := s.db.ExecContext(ctx,
+		if _, err := s.wdb.ExecContext(ctx,
 			`UPDATE domains SET etld_plus_one = ? WHERE domain = ?`,
 			etld.Compute(d), d); err != nil {
 			return updated, err
@@ -77,7 +176,7 @@ func (s *Store) UpsertDomain(ctx context.Context, domain, peer string, seenAt ti
 	}
 	ts := formatTime(seenAt)
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -129,7 +228,7 @@ func (s *Store) InsertProbe(ctx context.Context, r ProbeResult, createdAt time.T
 		return 0, err
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -187,7 +286,7 @@ func (s *Store) UpsertDNSObservation(ctx context.Context, domain, ip string, see
 		seenAt = time.Now().UTC()
 	}
 	ts := formatTime(seenAt)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.wdb.ExecContext(ctx, `
 		INSERT INTO dns_cache (domain, ip, first_seen_at, last_seen_at, hit_count)
 		VALUES (?, ?, ?, ?, 1)
 		ON CONFLICT(domain, ip) DO UPDATE SET
@@ -200,7 +299,7 @@ func (s *Store) UpsertDNSObservation(ctx context.Context, domain, ip string, see
 // LookupIPs returns the IPs recently observed for a domain, freshest first.
 func (s *Store) LookupIPs(ctx context.Context, domain string, freshSince time.Time) ([]string, error) {
 	ts := formatTime(freshSince)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.rdb.QueryContext(ctx,
 		`SELECT ip FROM dns_cache WHERE domain = ? AND last_seen_at >= ? ORDER BY last_seen_at DESC`,
 		domain, ts)
 	if err != nil {
@@ -226,7 +325,7 @@ func (s *Store) LookupIPs(ctx context.Context, domain string, freshSince time.Ti
 func (s *Store) ProbeEligible(ctx context.Context, domain string, now time.Time) (bool, error) {
 	ts := formatTime(now)
 	var state, cd sql.NullString
-	err := s.db.QueryRowContext(ctx,
+	err := s.rdb.QueryRowContext(ctx,
 		`SELECT state, cooldown_until FROM domains WHERE domain = ?`, domain).Scan(&state, &cd)
 	if err == sql.ErrNoRows {
 		// Unknown domain — definitely eligible (UpsertDomain is separate).
@@ -254,7 +353,7 @@ func (s *Store) PromoteCache(ctx context.Context, domain, reason string, at time
 		at = time.Now().UTC()
 	}
 	ts := formatTime(at)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -275,7 +374,7 @@ func (s *Store) PromoteCache(ctx context.Context, domain, reason string, at time
 
 // ListCacheEntries returns all cached domains.
 func (s *Store) ListCacheEntries(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT domain FROM cache_entries ORDER BY domain`)
+	rows, err := s.rdb.QueryContext(ctx, `SELECT domain FROM cache_entries ORDER BY domain`)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +396,7 @@ func (s *Store) ListCacheEntries(ctx context.Context) ([]string, error) {
 func (s *Store) CountFailingProbes(ctx context.Context, domain string, since time.Time) (int, error) {
 	ts := formatTime(since)
 	var n int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.rdb.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM probes
 		WHERE domain = ? AND created_at >= ? AND (COALESCE(tcp_ok, 0) = 0 OR COALESCE(tls_ok, 0) = 0)
 	`, domain, ts).Scan(&n)
@@ -306,7 +405,7 @@ func (s *Store) CountFailingProbes(ctx context.Context, domain string, since tim
 
 // UpsertManual adds a row to manual_entries. listName is 'allow' or 'deny'.
 func (s *Store) UpsertManual(ctx context.Context, domain, listName string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.wdb.ExecContext(ctx, `
 		INSERT INTO manual_entries (domain, list_name, created_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(domain) DO UPDATE SET list_name = excluded.list_name
@@ -316,7 +415,7 @@ func (s *Store) UpsertManual(ctx context.Context, domain, listName string) error
 
 // ListManualByList returns domains in a given list.
 func (s *Store) ListManualByList(ctx context.Context, listName string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.rdb.QueryContext(ctx,
 		`SELECT domain FROM manual_entries WHERE list_name = ? ORDER BY domain`, listName)
 	if err != nil {
 		return nil, err
@@ -345,7 +444,7 @@ func (s *Store) IsInDenyList(ctx context.Context, domain, etldPlusOne string) (b
 	}
 	q += ` LIMIT 1`
 	var one int
-	err := s.db.QueryRowContext(ctx, q, args...).Scan(&one)
+	err := s.rdb.QueryRowContext(ctx, q, args...).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -357,7 +456,7 @@ func (s *Store) IsInDenyList(ctx context.Context, domain, etldPlusOne string) (b
 // Meta's `netseer` UUID subdomains, for instance, all share fbcdn.net IPs.
 func (s *Store) LookupIPsByETLD(ctx context.Context, etldPlusOne string, freshSince time.Time) ([]string, error) {
 	ts := formatTime(freshSince)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rdb.QueryContext(ctx, `
 		SELECT DISTINCT c.ip
 		FROM dns_cache c
 		JOIN domains d ON d.domain = c.domain
@@ -391,7 +490,7 @@ func (s *Store) LookupIPsByETLD(ctx context.Context, etldPlusOne string, freshSi
 // Ordered by oldest cooldown first, then most-recent observations first.
 func (s *Store) ListProbeCandidates(ctx context.Context, limit int, now time.Time) ([]Domain, error) {
 	ts := formatTime(now)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rdb.QueryContext(ctx, `
 		SELECT domain, COALESCE(etld_plus_one, ''), COALESCE(first_seen_at, ''),
 		       COALESCE(last_seen_at, ''), hit_count, peer_count, state, score,
 		       COALESCE(cooldown_until, ''), last_probe_id
@@ -432,7 +531,7 @@ func (s *Store) SetDomainState(ctx context.Context, domain, state string, cooldo
 	} else {
 		cd = formatTime(cooldownUntil)
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.wdb.ExecContext(ctx,
 		`UPDATE domains SET state = ?, cooldown_until = ? WHERE domain = ?`,
 		state, cd, domain)
 	return err
@@ -441,7 +540,7 @@ func (s *Store) SetDomainState(ctx context.Context, domain, state string, cooldo
 // UpsertHotEntry adds or refreshes a hot_entries row.
 func (s *Store) UpsertHotEntry(ctx context.Context, domain, reason string, expiresAt time.Time) error {
 	now := formatTime(time.Now().UTC())
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.wdb.ExecContext(ctx, `
 		INSERT INTO hot_entries (domain, expires_at, reason, created_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(domain) DO UPDATE SET
@@ -454,7 +553,7 @@ func (s *Store) UpsertHotEntry(ctx context.Context, domain, reason string, expir
 // ListHotEntries returns currently-live hot_entries (expires_at > now).
 func (s *Store) ListHotEntries(ctx context.Context, now time.Time) ([]string, error) {
 	ts := formatTime(now)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.rdb.QueryContext(ctx,
 		`SELECT domain FROM hot_entries WHERE expires_at > ? ORDER BY domain`, ts)
 	if err != nil {
 		return nil, err
@@ -475,7 +574,7 @@ func (s *Store) ListHotEntries(ctx context.Context, now time.Time) ([]string, er
 // ExpireHotEntries deletes rows where expires_at <= now. Returns deleted count.
 func (s *Store) ExpireHotEntries(ctx context.Context, now time.Time) (int64, error) {
 	ts := formatTime(now)
-	res, err := s.db.ExecContext(ctx, `DELETE FROM hot_entries WHERE expires_at <= ?`, ts)
+	res, err := s.wdb.ExecContext(ctx, `DELETE FROM hot_entries WHERE expires_at <= ?`, ts)
 	if err != nil {
 		return 0, err
 	}
@@ -487,7 +586,7 @@ func (s *Store) ExpireHotEntries(ctx context.Context, now time.Time) (int64, err
 // methodological — domain shouldn't sit in ipset for 24h on a stale opinion).
 // Returns true if a row was deleted.
 func (s *Store) DeleteHotEntry(ctx context.Context, domain string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM hot_entries WHERE domain = ?`, domain)
+	res, err := s.wdb.ExecContext(ctx, `DELETE FROM hot_entries WHERE domain = ?`, domain)
 	if err != nil {
 		return false, err
 	}
@@ -499,17 +598,17 @@ func (s *Store) DeleteHotEntry(ctx context.Context, domain string) (bool, error)
 // specific cutoff to only delete rows promoted before it. Operator-triggered
 // cleanup (ladon prune -cache).
 func (s *Store) PruneCache(ctx context.Context, before time.Time) (int64, error) {
-	return deleteWithOptionalBefore(ctx, s.db, "cache_entries", "promoted_at", before)
+	return deleteWithOptionalBefore(ctx, s.wdb, "cache_entries", "promoted_at", before)
 }
 
 // PruneHot deletes hot_entries rows. See PruneCache for semantics.
 func (s *Store) PruneHot(ctx context.Context, before time.Time) (int64, error) {
-	return deleteWithOptionalBefore(ctx, s.db, "hot_entries", "created_at", before)
+	return deleteWithOptionalBefore(ctx, s.wdb, "hot_entries", "created_at", before)
 }
 
 // PruneProbes deletes probes rows. See PruneCache for semantics.
 func (s *Store) PruneProbes(ctx context.Context, before time.Time) (int64, error) {
-	return deleteWithOptionalBefore(ctx, s.db, "probes", "created_at", before)
+	return deleteWithOptionalBefore(ctx, s.wdb, "probes", "created_at", before)
 }
 
 // DeleteDeniedDomains removes rows from the domains table whose domain or
@@ -520,7 +619,7 @@ func (s *Store) PruneProbes(ctx context.Context, before time.Time) (int64, error
 // prune subcommand so operators get a clean domains table alongside the
 // hot/cache/probes cleanup they already asked for. Returns rows deleted.
 func (s *Store) DeleteDeniedDomains(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.wdb.ExecContext(ctx, `
 		DELETE FROM domains
 		WHERE domain IN (SELECT domain FROM manual_entries WHERE list_name = 'deny')
 		   OR (etld_plus_one IS NOT NULL AND etld_plus_one != ''
@@ -537,7 +636,7 @@ func (s *Store) DeleteDeniedDomains(ctx context.Context) (int64, error) {
 // after a prune to make sure those domains can be re-probed from scratch
 // instead of sitting in a stale terminal state.
 func (s *Store) ResetOrphanedDomains(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.wdb.ExecContext(ctx, `
 		UPDATE domains
 		SET state = 'new', cooldown_until = NULL, last_probe_id = NULL
 		WHERE state IN ('hot', 'cache', 'ignore')
@@ -553,13 +652,13 @@ func (s *Store) ResetOrphanedDomains(ctx context.Context) (int64, error) {
 // CountCache, CountHot, CountProbes are dry-run companions to the Prune*
 // helpers — same WHERE clause, no mutation. Used by `ladon prune -dry-run`.
 func (s *Store) CountCache(ctx context.Context, before time.Time) (int64, error) {
-	return countWithOptionalBefore(ctx, s.db, "cache_entries", "promoted_at", before)
+	return countWithOptionalBefore(ctx, s.rdb, "cache_entries", "promoted_at", before)
 }
 func (s *Store) CountHot(ctx context.Context, before time.Time) (int64, error) {
-	return countWithOptionalBefore(ctx, s.db, "hot_entries", "created_at", before)
+	return countWithOptionalBefore(ctx, s.rdb, "hot_entries", "created_at", before)
 }
 func (s *Store) CountProbes(ctx context.Context, before time.Time) (int64, error) {
-	return countWithOptionalBefore(ctx, s.db, "probes", "created_at", before)
+	return countWithOptionalBefore(ctx, s.rdb, "probes", "created_at", before)
 }
 
 // deleteWithOptionalBefore is the common shape of the three prune helpers.
@@ -591,7 +690,7 @@ func countWithOptionalBefore(ctx context.Context, db *sql.DB, table, tsColumn st
 }
 
 func (s *Store) ListRecentDomains(ctx context.Context, limit int) ([]Domain, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rdb.QueryContext(ctx, `
 		SELECT domain, COALESCE(etld_plus_one, ''), COALESCE(first_seen_at, ''),
 		       COALESCE(last_seen_at, ''), hit_count, peer_count, state, score,
 		       COALESCE(cooldown_until, ''), last_probe_id
