@@ -4,20 +4,88 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/belotserkovtsev/ladon/internal/etld"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 type Store struct {
 	db *sql.DB
 }
 
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+// perConnPragmas runs on every new connection the pool opens. modernc.org/sqlite's
+// DSN _pragma= form reliably applies database-level settings that persist in the
+// file header (journal_mode=WAL), but per-connection settings (busy_timeout,
+// foreign_keys) do not propagate past the first connection — on a live DB they
+// read back as 0. Applying them in a connector Connect wrapper is the idiomatic
+// database/sql pattern: PRAGMA runs once per conn, pool scales freely, WAL's
+// reader-alongside-writer parallelism is preserved.
+var perConnPragmas = []string{
+	`PRAGMA busy_timeout = 5000`,
+	`PRAGMA foreign_keys = ON`,
+}
+
+// dsnConnector adapts modernc.org/sqlite's driver.Driver (which does not
+// implement driver.DriverContext) to the driver.Connector interface that
+// sql.OpenDB needs.
+type dsnConnector struct {
+	drv driver.Driver
+	dsn string
+}
+
+func (c *dsnConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return c.drv.Open(c.dsn)
+}
+
+func (c *dsnConnector) Driver() driver.Driver { return c.drv }
+
+// pragmaConnector wraps a driver.Connector and runs the PRAGMAs on each new
+// connection before handing it to the pool.
+type pragmaConnector struct {
+	base    driver.Connector
+	pragmas []string
+}
+
+func (p *pragmaConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := p.base.Connect(ctx)
 	if err != nil {
+		return nil, err
+	}
+	execer, ok := conn.(driver.ExecerContext)
+	if !ok {
+		conn.Close()
+		return nil, errors.New("storage: driver.Conn does not implement ExecerContext")
+	}
+	for _, stmt := range p.pragmas {
+		if _, err := execer.ExecContext(ctx, stmt, nil); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("storage: apply %q: %w", stmt, err)
+		}
+	}
+	return conn, nil
+}
+
+func (p *pragmaConnector) Driver() driver.Driver { return p.base.Driver() }
+
+func Open(path string) (*Store, error) {
+	connector := &pragmaConnector{
+		base: &dsnConnector{
+			drv: &sqlite.Driver{},
+			dsn: path + "?_pragma=journal_mode(WAL)",
+		},
+		pragmas: perConnPragmas,
+	}
+	db := sql.OpenDB(connector)
+	// Verify connectivity + PRAGMA application eagerly: Ping opens one conn,
+	// which runs the wrapper and surfaces any driver/pragma failure at startup
+	// instead of on the first real query.
+	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
