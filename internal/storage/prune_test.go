@@ -105,7 +105,7 @@ func TestPrune(t *testing.T) {
 
 func mustExec(t *testing.T, s *Store, q string, args ...any) {
 	t.Helper()
-	if _, err := s.db.ExecContext(context.Background(), q, args...); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
 	}
 }

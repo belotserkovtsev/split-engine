@@ -266,7 +266,7 @@ func TestDeleteDeniedDomains(t *testing.T) {
 
 	// Verify only keeper.test remains.
 	var surviving int
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.rdb.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM domains`).Scan(&surviving); err != nil {
 		t.Fatal(err)
 	}
