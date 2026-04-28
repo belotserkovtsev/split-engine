@@ -3,15 +3,14 @@
 # Подключается через config.yaml:
 #   allow_extensions: [kinopub]
 #
-# KinoPub — стриминг-сервис фильмов/сериалов. Включает зеркала
-# (kinopub.* TLDs), CDN-инфраструктуру и сторонние сервисы, которые
-# приложение/сайт реально использует.
+# KinoPub — стриминг-сервис фильмов/сериалов. Зеркала (kinopub.* TLDs),
+# приватная CDN-инфраструктура и метаданные.
 #
-# WARNING: пресет содержит несколько широких eTLD+1 (duckdns.org,
-# onrender.com, b-cdn.net), которые не эксклюзивны для KinoPub —
-# их используют тысячи других сервисов. Включай только если
-# готов туннелировать «всё что хостится на этих платформах».
-# При сомнениях держи свой узкий manual-allow.txt вместо пресета.
+# NOTE: ранее в пресете были broad eTLD+1 (duckdns.org, onrender.com,
+# b-cdn.net), которые KinoPub использует для отдельных зеркал, но их
+# eTLD+1 expansion цеплял тысячи unrelated сервисов. Убраны из bundle.
+# Если конкретное зеркало через эти провайдеры перестало работать —
+# положи точечный поддомен в manual-allow.txt.
 
 # Core
 kino.pub
@@ -23,17 +22,12 @@ kinopub.media
 kinopub.rocks
 kino-pub.tv
 
-# CDN / video infra
-b-cdn.net
+# CDN / video infra (KinoPub-specific)
 cdn2cdn.com
 cdn2site.com
 digital-cdn.net
 kpserver.link
 trackercdn.com
-
-# Третьи стороны (broad — см. WARNING выше)
-duckdns.org
-onrender.com
 
 # Метаданные / уведомления
 tmdb.org

@@ -31,6 +31,3 @@ ytimg.com
 yt3.ggpht.com
 yt3.googleusercontent.com
 yt4.ggpht.com
-
-# CDN-зависимости
-stable.dl2.discordapp.net

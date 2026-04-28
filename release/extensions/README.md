@@ -24,8 +24,8 @@ allow_extensions: [ai, twitch, tiktok]
 | `ai` | allow | OpenAI / ChatGPT, Anthropic / Claude |
 | `chess` | allow | Chess.com + статика |
 | `discord` | allow | Discord (приложение, gateway, CDN, медиа, активити, мерч) |
-| `kinopub` | allow | KinoPub (зеркала, CDN, метаданные) — содержит broad domains, см. файл |
-| `soundcloud` | allow | SoundCloud + третьи стороны (CloudFront, Zendesk) — содержит broad domains, см. файл |
+| `kinopub` | allow | KinoPub (зеркала, CDN, метаданные) |
+| `soundcloud` | allow | SoundCloud (core domains) |
 | `tiktok` | allow | TikTok / ByteDance overseas (core, regional CDN, backbone, SDK) |
 | `twitch` | allow | Twitch (core + CDN + community-расширения 7tv/BetterTTV/FrankerFaceZ) |
 | `youtube` | allow | YouTube (web, видео-CDN, embed-плеер, kids, YT-Google APIs) |
