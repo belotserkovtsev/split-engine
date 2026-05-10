@@ -60,6 +60,13 @@ const (
 	CodeHTTPReset   FailureCode = "http_reset"
 	CodeHTTPError   FailureCode = "http_error"
 
+	// CodeHTTP451 is set when the server returns HTTP 451 Unavailable For
+	// Legal Reasons (RFC 7725). RU ISPs occasionally inject 451 responses
+	// inline with HTTP traffic, and some upstreams genuinely emit it
+	// upstream. Either way the path is unusable for the client, so it's
+	// classified as a typed block — not server-reachable.
+	CodeHTTP451 FailureCode = "http_451"
+
 	// CodeRemote means the remote prober itself was unreachable — not a
 	// verdict about the target. Engine treats as Hot (safe default) but
 	// readers can distinguish from real DPI signals.
@@ -243,7 +250,7 @@ func parseCode(reason string) FailureCode {
 		CodeTCPRefused, CodeTCPReset, CodeTCPTimeout, CodeTCPUnreachable, CodeTCPError,
 		CodeTLSHandshakeTimeout, CodeTLSEOF, CodeTLSReset, CodeTLSAlert, CodeTLSError, CodeTLSGarbage, CodeTLS13Block,
 		CodeMTLSRequired,
-		CodeHTTPCutoff, CodeHTTPTimeout, CodeHTTPReset, CodeHTTPError,
+		CodeHTTPCutoff, CodeHTTPTimeout, CodeHTTPReset, CodeHTTPError, CodeHTTP451,
 		CodeRemote, CodeUnknown:
 		return FailureCode(prefix)
 	}

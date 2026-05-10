@@ -330,6 +330,20 @@ func probeHTTPStaged(r *Result, conn *tls.Conn, timeout time.Duration) {
 		return
 	}
 
+	// HTTP 451 (RFC 7725) is a typed block signal: either an upstream
+	// returned it for legal reasons, or a middlebox injected it inline.
+	// Either way the path is unusable. Treat as Hot — distinct from a
+	// 4xx/5xx that just means "server doesn't like this request" but
+	// still validates path reachability.
+	if resp.StatusCode == 451 {
+		resp.Body.Close()
+		f := false
+		r.HTTPOK = &f
+		r.FailureCode = CodeHTTP451
+		r.FailureReason = string(CodeHTTP451)
+		return
+	}
+
 	// Drain up to the limit. Many small responses finish well below it
 	// (e.g. an empty 204 or a 301 redirect) — that's fine, EOF after a
 	// clean response is success. We only fail on read errors that
