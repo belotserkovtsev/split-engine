@@ -34,6 +34,15 @@ const (
 	CodeTLSAlert            FailureCode = "tls_alert"
 	CodeTLSError            FailureCode = "tls_error"
 
+	// CodeTLSGarbage is set when bytes on the wire don't decode as valid
+	// TLS — either the record header is malformed (tls.RecordHeaderError)
+	// or the Go parser hit a record-level corruption (oversized record,
+	// wrong version number, decode error). Distinct from CodeTLSAlert,
+	// which is a typed response from a live peer ("remote error: tls: ...").
+	// Garbage is path-active: middleboxes that don't speak TLS but try to
+	// inject responses produce this signature. Not server-reachable.
+	CodeTLSGarbage FailureCode = "tls_garbage"
+
 	// CodeMTLSRequired is TLS alert 116 (certificate_required, RFC 8446 §6).
 	// Server explicitly told us it needs a client certificate — proves the
 	// server is reachable and that the failure is a server-side policy
@@ -123,7 +132,7 @@ func categorize(stage string, err error) FailureCode {
 		return CodeTLSAlert
 	}
 	if rh := (tls.RecordHeaderError{}); errors.As(err, &rh) {
-		return CodeTLSAlert
+		return CodeTLSGarbage
 	}
 	// String fallback for Go's internal tls.alert wrapping. Covers the
 	// "remote error: tls: <description>" format Conn.in errors take. The
@@ -135,6 +144,23 @@ func categorize(stage string, err error) FailureCode {
 			return CodeMTLSRequired
 		}
 		return CodeTLSAlert
+	}
+	// Local TLS parser errors — the bytes we received didn't decode as
+	// valid TLS at the record layer. Distinct from "remote error: tls:"
+	// alerts (handled above): those are typed responses from a peer that
+	// completed at least record-level framing. These signatures (record
+	// overflow, oversized, wrong version, decode error) are produced when
+	// a middlebox injects bytes that don't honor TLS framing — the
+	// classic mid-stream-spoof pattern documented by RU-DPI deployments.
+	// Path-active; not server-reachable.
+	if errStr := err.Error(); strings.HasPrefix(errStr, "tls: ") || strings.Contains(errStr, "local error: tls:") {
+		if strings.Contains(errStr, "oversized record") ||
+			strings.Contains(errStr, "record overflow") ||
+			strings.Contains(errStr, "wrong version number") ||
+			strings.Contains(errStr, "decode error") ||
+			strings.Contains(errStr, "first record does not look like") {
+			return CodeTLSGarbage
+		}
 	}
 
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -215,7 +241,7 @@ func parseCode(reason string) FailureCode {
 	switch FailureCode(prefix) {
 	case CodeDNSNXDomain, CodeDNSTimeout, CodeDNSError, CodeNoIPs,
 		CodeTCPRefused, CodeTCPReset, CodeTCPTimeout, CodeTCPUnreachable, CodeTCPError,
-		CodeTLSHandshakeTimeout, CodeTLSEOF, CodeTLSReset, CodeTLSAlert, CodeTLSError, CodeTLS13Block,
+		CodeTLSHandshakeTimeout, CodeTLSEOF, CodeTLSReset, CodeTLSAlert, CodeTLSError, CodeTLSGarbage, CodeTLS13Block,
 		CodeMTLSRequired,
 		CodeHTTPCutoff, CodeHTTPTimeout, CodeHTTPReset, CodeHTTPError,
 		CodeRemote, CodeUnknown:

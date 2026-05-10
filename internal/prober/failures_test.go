@@ -111,11 +111,45 @@ func TestCategorizeTLSAlert(t *testing.T) {
 	}
 }
 
+func TestCategorizeTLSGarbage(t *testing.T) {
+	// tls.RecordHeaderError fires when the first bytes don't look like a
+	// TLS record header — exactly what middlebox injection produces when
+	// the box doesn't speak TLS but tries to spoof responses. Must NOT
+	// route to CodeTLSAlert (which is server-reachable).
+	rh := tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}
+	if got := categorize(stageTLS, rh); got != CodeTLSGarbage {
+		t.Errorf("RecordHeaderError → %q want %q", got, CodeTLSGarbage)
+	}
+
+	// Local-side TLS parser errors. These come from Go's TLS stack rejecting
+	// the bytes it received as malformed at the record layer — distinct
+	// from "remote error: tls: ..." (peer alert, handled separately).
+	garbageCases := []string{
+		"tls: oversized record received with length 31337",
+		"local error: tls: record overflow",
+		"tls: wrong version number",
+		"tls: decode error",
+		"tls: first record does not look like a TLS handshake",
+	}
+	for _, msg := range garbageCases {
+		if got := categorize(stageTLS, errors.New(msg)); got != CodeTLSGarbage {
+			t.Errorf("%q → %q want %q", msg, got, CodeTLSGarbage)
+		}
+	}
+
+	// Negative — peer alert must still go to CodeTLSAlert, not garbage.
+	// "remote error: tls:" prefix is the discriminator.
+	if got := categorize(stageTLS, errors.New("remote error: tls: handshake failure")); got != CodeTLSAlert {
+		t.Errorf("remote alert → %q want %q (must not collapse to garbage)", got, CodeTLSAlert)
+	}
+}
+
 func TestIsServerReachable(t *testing.T) {
 	want := map[FailureCode]bool{
 		CodeOK:                  false,
 		CodeMTLSRequired:        true,
 		CodeTLSAlert:            true,
+		CodeTLSGarbage:          false, // path-active injection, NOT reachable
 		CodeHTTPCutoff:          false,
 		CodeHTTPReset:           false,
 		CodeTCPTimeout:          false,
