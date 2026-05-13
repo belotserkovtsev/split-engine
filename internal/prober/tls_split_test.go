@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-
 // TestTLSSplit_Default exercises the unrestricted 1.3 path against a real
 // httptest TLS server. Both sides default to 1.3, so TLS13OK should be set
 // and the 1.2 retry should not fire.
