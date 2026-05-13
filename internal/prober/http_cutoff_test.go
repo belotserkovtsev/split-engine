@@ -40,6 +40,32 @@ func TestHTTPCutoff_FullResponse(t *testing.T) {
 	}
 }
 
+// TestHTTPCutoff_451 — server returns 451. Probe should treat this as a
+// typed block (HTTPOK=false, FailureCode=CodeHTTP451) — distinct from 404
+// which still validates path reachability.
+func TestHTTPCutoff_451(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Unavailable For Legal Reasons", 451)
+	}))
+	defer srv.Close()
+
+	host, port := splitHostPort(t, srv.Listener.Addr().String())
+	r := Result{Domain: "example.com", ResolvedIPs: []string{host}}
+	conn := probeTLSStaged(&r, host, port, 2*time.Second)
+	if conn == nil {
+		t.Fatalf("TLS handshake failed: %s / %s", r.FailureCode, r.FailureReason)
+	}
+	probeHTTPStaged(&r, conn, 2*time.Second)
+	conn.Close()
+
+	if r.HTTPOK == nil || *r.HTTPOK {
+		t.Errorf("HTTPOK=%v want ptr(false) — 451 must surface as block", r.HTTPOK)
+	}
+	if r.FailureCode != CodeHTTP451 {
+		t.Errorf("FailureCode=%q want %q", r.FailureCode, CodeHTTP451)
+	}
+}
+
 // TestHTTPCutoff_404 — server returns 404. Probe should still treat the
 // path as reachable; we're not classifying server semantics.
 func TestHTTPCutoff_404(t *testing.T) {

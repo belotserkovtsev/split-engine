@@ -100,6 +100,61 @@ func TestTLSSplit_BothFail(t *testing.T) {
 	}
 }
 
+// TestLiftTLS13Verdict tests the post-probe lift that promotes a
+// "1.3 path-active failed, 1.2 ok, HTTP ok" result to CodeTLS13Block.
+// Integration-testing a forged-alert DPI scenario requires a low-level
+// TLS server that injects RST mid-handshake based on advertised
+// supported_versions — out of scope here. The unit test covers the
+// verdict logic; full chain is exercised in production deploy logs.
+func TestLiftTLS13Verdict(t *testing.T) {
+	tr, fa := true, false
+	cases := []struct {
+		name string
+		in   Result
+		want FailureCode
+	}{
+		{
+			name: "1.3 fail + 1.2 ok + HTTP ok → tls13_block",
+			in:   Result{TLS13OK: &fa, TLS12OK: &tr, HTTPOK: &tr, FailureCode: CodeOK},
+			want: CodeTLS13Block,
+		},
+		{
+			name: "1.3 fail + 1.2 ok + HTTP nil (legacy probe-server) → tls13_block",
+			in:   Result{TLS13OK: &fa, TLS12OK: &tr, FailureCode: CodeOK},
+			want: CodeTLS13Block,
+		},
+		{
+			name: "server is 1.2-only (TLS13OK=nil) → no lift",
+			in:   Result{TLS13OK: nil, TLS12OK: &tr, HTTPOK: &tr, FailureCode: CodeOK},
+			want: CodeOK,
+		},
+		{
+			name: "1.3 ok → no lift",
+			in:   Result{TLS13OK: &tr, HTTPOK: &tr, FailureCode: CodeOK},
+			want: CodeOK,
+		},
+		{
+			name: "1.3 fail + 1.2 fail → no lift (existing failure stands)",
+			in:   Result{TLS13OK: &fa, TLS12OK: &fa, FailureCode: CodeTLSReset},
+			want: CodeTLSReset,
+		},
+		{
+			name: "1.3 fail + 1.2 ok + HTTP fail → no lift (HTTP failure is more proximate)",
+			in:   Result{TLS13OK: &fa, TLS12OK: &tr, HTTPOK: &fa, FailureCode: CodeHTTPCutoff},
+			want: CodeHTTPCutoff,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.in
+			liftTLS13Verdict(&r)
+			if r.FailureCode != tc.want {
+				t.Errorf("FailureCode=%q want %q", r.FailureCode, tc.want)
+			}
+		})
+	}
+}
+
 func splitHostPort(t *testing.T, addr string) (string, string) {
 	t.Helper()
 	host, port, err := net.SplitHostPort(addr)

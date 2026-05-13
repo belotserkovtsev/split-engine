@@ -173,9 +173,34 @@ func probeTCPTLS(ctx context.Context, r Result, started time.Time, timeout time.
 	if conn != nil {
 		probeHTTPStaged(&r, conn, timeout)
 		conn.Close()
+		liftTLS13Verdict(&r)
 	}
 	r.LatencyMS = int(time.Since(started) / time.Millisecond)
 	return r
+}
+
+// liftTLS13Verdict promotes a "1.3 path-active failed, 1.2 retry succeeded,
+// HTTP confirmed reachable" combination into a CodeTLS13Block verdict.
+// Real-world signal for RU-DPI deployments that target ECH/ESNI in the 1.3
+// ClientHello while letting 1.2 through.
+//
+// Discriminator from "server is 1.2-only": r.TLS13OK==false (not nil).
+// false means the unrestricted dial reached the TLS stage and failed there;
+// nil means it negotiated 1.2 cleanly. Only path-active 1.3 failures
+// trigger this — server-reachable 1.3 alerts (mTLS-required, etc) bail
+// out of probeTLSStaged before the 1.2 retry runs, so TLS12OK stays nil.
+func liftTLS13Verdict(r *Result) {
+	if r.TLS12OK == nil || !*r.TLS12OK {
+		return
+	}
+	if r.TLS13OK == nil || *r.TLS13OK {
+		return
+	}
+	if r.HTTPOK != nil && !*r.HTTPOK {
+		return
+	}
+	r.FailureCode = CodeTLS13Block
+	r.FailureReason = string(CodeTLS13Block)
 }
 
 // probeTLSStaged runs the TLS-SNI handshake first unrestricted (Go picks the
@@ -327,6 +352,20 @@ func probeHTTPStaged(r *Result, conn *tls.Conn, timeout time.Duration) {
 		// Headers never completed — DPI most often cuts here, before the
 		// server even gets a chance to respond. Categorize as cutoff.
 		setHTTPFail(r, stageHTTP, err)
+		return
+	}
+
+	// HTTP 451 (RFC 7725) is a typed block signal: either an upstream
+	// returned it for legal reasons, or a middlebox injected it inline.
+	// Either way the path is unusable. Treat as Hot — distinct from a
+	// 4xx/5xx that just means "server doesn't like this request" but
+	// still validates path reachability.
+	if resp.StatusCode == 451 {
+		resp.Body.Close()
+		f := false
+		r.HTTPOK = &f
+		r.FailureCode = CodeHTTP451
+		r.FailureReason = string(CodeHTTP451)
 		return
 	}
 
