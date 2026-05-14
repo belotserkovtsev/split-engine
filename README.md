@@ -26,7 +26,7 @@ curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/ins
 с WireGuard и dnsmasq. Полный runbook + manual install + troubleshooting —
 в [docs/install.md](docs/install.md).
 
-## Ladon
+## Как работает
 
 Классификация по сигнатуре отказа в живой сети, а не по готовому списку.
 
