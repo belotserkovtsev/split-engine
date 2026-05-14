@@ -110,7 +110,6 @@ install -m 0644 "$SRC/ladon.service"     /etc/systemd/system/ladon.service
 [[ ! -f "$LADON_CONFIG_DIR/config.yaml" ]] && \
   install -m 0644 "$SRC/config.yaml.example"      "$LADON_CONFIG_DIR/config.yaml"
 install -m 0644 "$SRC/extensions/"*.txt  "$LADON_PREFIX/extensions/"
-install -m 0644 "$SRC/extensions/README.md" "$LADON_PREFIX/extensions/"
 
 # --- step 4: ipsets (idempotent) ---
 log "creating ipsets ($IPSET_ENGINE, $IPSET_MANUAL, $IPSET_CIDR)"
@@ -207,9 +206,11 @@ Next steps:
        allow_extensions: [ai, twitch, tiktok]
      No deny presets ship — edit $LADON_CONFIG_DIR/manual-deny.txt or
      write a custom one and reference it in deny_extensions: [...].
-     Full catalogue + semantics: $LADON_PREFIX/extensions/README.md.
+     Full catalogue + semantics:
+       https://github.com/belotserkovtsev/ladon/blob/main/docs/extensions.md
   4. (Optional) For exit-compare validator, set probe.mode: exit-compare
-     in config.yaml. See $LADON_PREFIX/README.md.
+     in config.yaml. See:
+       https://github.com/belotserkovtsev/ladon/blob/main/docs/probe-api.md
 
 To uninstall: download and run release/uninstall.sh from the same release.
 EOF
