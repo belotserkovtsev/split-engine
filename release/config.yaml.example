@@ -14,7 +14,8 @@
 
 # --- probe backend ---
 
-# Extensions — преднастроенные allow/deny-списки. См. /opt/ladon/extensions/README.md
+# Extensions — преднастроенные allow/deny-списки.
+# См. https://github.com/belotserkovtsev/ladon/blob/main/docs/extensions.md
 # allow_extensions:
 #   - ai
 #   - twitch

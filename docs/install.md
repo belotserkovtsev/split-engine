@@ -1,5 +1,7 @@
 # Установка ladon
 
+← [README](../README.md) · [конфигурация](configuration.md) · [extensions](extensions.md)
+
 ## TL;DR — установка одной командой (Debian/Ubuntu)
 
 ```bash
@@ -30,7 +32,7 @@ curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/uni
 
 Опциональные env-переменные (для нестандартных сетапов): `IPSET_ENGINE`,
 `IPSET_MANUAL`, `LADON_PREFIX`, `LADON_CONFIG_DIR` — см. дефолты в
-[`install.sh`](install.sh).
+[`release/install.sh`](../release/install.sh).
 
 ---
 
@@ -83,31 +85,32 @@ install -m 0644 manual-allow.txt.example /etc/ladon/manual-allow.txt
 install -m 0644 manual-deny.txt.example  /etc/ladon/manual-deny.txt
 
 # Extensions — преднастроенные allow-списки (ai, twitch, ...). Опциональны,
-# подключаются по имени через config.yaml. См. extensions/README.md.
+# подключаются по имени через config.yaml. Полный справочник: docs/extensions.md.
 install -d /opt/ladon/extensions
 install -m 0644 extensions/*.txt /opt/ladon/extensions/
-install -m 0644 extensions/README.md /opt/ladon/extensions/
 ```
 
 ## 3. Подготовка netfilter
 
 ```bash
-# Два ipset'а с разной ответственностью:
+# Три ipset'а с разной ответственностью:
 #   ladon_engine — управляется ладоном из probe-driven discovery (hot/cache)
 #   ladon_manual — populates dnsmasq из ladon-manual.conf (manual-allow + extensions)
-ipset create ladon_engine hash:ip family inet maxelem 65536
-ipset create ladon_manual hash:ip family inet maxelem 65536 timeout 86400
+#   ladon_cidr   — статический hash:net для CIDR-блоков из extensions
+#                  (Telegram MTProto, Discord voice, etc.) — нужен только если
+#                  включаете extensions, объявляющие CIDR-диапазоны
+ipset create ladon_engine hash:ip  family inet maxelem 65536
+ipset create ladon_manual hash:ip  family inet maxelem 65536 timeout 86400
+ipset create ladon_cidr   hash:net family inet maxelem 65536
 
-# Два iptables-правила в WG_ROUTE — оба ведут в один и тот же fwmark 0x1.
+# Три iptables-правила в WG_ROUTE — все три ведут в один и тот же fwmark 0x1.
 # Пример для pipeline, где peer 10.10.0.2 → fwmark 0x1 → tunnel:
-iptables -t mangle -A WG_ROUTE \
-  -s 10.10.0.2/32 \
-  -m set --match-set ladon_engine dst \
-  -j MARK --set-mark 0x1
-iptables -t mangle -A WG_ROUTE \
-  -s 10.10.0.2/32 \
-  -m set --match-set ladon_manual dst \
-  -j MARK --set-mark 0x1
+for SET in ladon_engine ladon_manual ladon_cidr; do
+  iptables -t mangle -A WG_ROUTE \
+    -s 10.10.0.2/32 \
+    -m set --match-set "$SET" dst \
+    -j MARK --set-mark 0x1
+done
 
 # Сохранить для переживания ребута
 mkdir -p /etc/iptables
@@ -116,7 +119,11 @@ ipset save    > /etc/iptables/ipsets
 systemctl enable netfilter-persistent
 ```
 
-**Почему два ipset'а:** `ladon_engine` — динамический, ладон периодически пересоздаёт его на основе hot/cache → reconcile удаляет лишнее. `ladon_manual` — populated dnsmasq'ом синхронно при резолве через `ipset=/domain/ladon_manual` директивы, которые ладон записывает в `/etc/dnsmasq.d/ladon-manual.conf`. Если бы они были одним ipset'ом, ладон при reconcile удалял бы IP-шки которые добавил dnsmasq и про которые ладон не знает. Timeout=86400 на `ladon_manual` — естественная эвикция стейл-IP'шек, dnsmasq refresh'ит timeout при каждом резолве.
+**Почему разные ipset'ы:**
+
+- `ladon_engine` — динамический, ладон периодически пересоздаёт его на основе hot/cache → reconcile удаляет лишнее.
+- `ladon_manual` — populated dnsmasq'ом синхронно при резолве через `ipset=/domain/ladon_manual` директивы, которые ладон записывает в `/etc/dnsmasq.d/ladon-manual.conf`. Если бы он был одним ipset'ом с `ladon_engine`, ладон при reconcile удалял бы IP-шки которые добавил dnsmasq и про которые ладон не знает. Timeout=86400 — естественная эвикция стейл-IP'шек, dnsmasq refresh'ит timeout при каждом резолве.
+- `ladon_cidr` — `hash:net` для CIDR-диапазонов из extensions (например, Telegram MTProto data-plane на `91.108.0.0/16`). Заполняется ладоном при старте из extension-файлов; матчится iptables на уровне dst IP, минуя DNS.
 
 ### Capability для dnsmasq (обязательно)
 
@@ -153,9 +160,13 @@ ip route replace default dev tun0 table ladon
 
 Эта часть обычно настраивается на стороне твоего VPN-стека — ladon
 предполагает что routing-таблица и fwmark → интерфейс уже готовы, и просто
-наполняет ipset `prod`.
+наполняет ipset'ы `ladon_engine` / `ladon_manual` / `ladon_cidr`.
 
 ## 4. Инициализация и запуск
+
+> **`init-db` обязателен перед первым запуском.** Подкоманда `run` НЕ создаёт
+> schema автоматически — без `init-db` журнал заспамится `no such table:
+> domains/probes/...` и сервис будет non-functional.
 
 ```bash
 # Создать схему БД
@@ -176,7 +187,7 @@ journalctl -u ladon -f
 
 ```
 probe example.com → HOT (tcp_connect_failed, 800ms)
-ipset prod: +5 -0 (total 5, etlds expanded 1)
+ipset ladon_engine: +5 -0 (total 5, etlds expanded 1)
 ```
 
 ## 5. Проверка работы
@@ -186,8 +197,10 @@ ipset prod: +5 -0 (total 5, etlds expanded 1)
 sqlite3 /opt/ladon/state/engine.db \
   "SELECT state, COUNT(*) FROM domains GROUP BY state"
 
-# Сколько IP в ipset
-ipset list prod -t | grep entries
+# Сколько IP в каждом ipset
+for SET in ladon_engine ladon_manual ladon_cidr; do
+  echo -n "$SET: "; ipset list "$SET" -t 2>/dev/null | grep '^Number'
+done
 
 # Последние 10 вердиктов
 sqlite3 -column /opt/ladon/state/engine.db \
@@ -216,9 +229,15 @@ systemctl restart ladon
 systemctl disable --now ladon
 rm /etc/systemd/system/ladon.service
 rm -rf /opt/ladon /etc/ladon
-ipset destroy prod
-iptables -t mangle -D WG_ROUTE -s 10.10.0.2/32 \
-  -m set --match-set prod dst -j MARK --set-mark 0x1
+
+# Снести iptables-правила и ipset'ы (зеркало Step 3)
+for SET in ladon_engine ladon_manual ladon_cidr; do
+  iptables -t mangle -D WG_ROUTE -s 10.10.0.2/32 \
+    -m set --match-set "$SET" dst -j MARK --set-mark 0x1
+  ipset destroy "$SET"
+done
+iptables-save > /etc/iptables/rules.v4
+ipset save    > /etc/iptables/ipsets
 ```
 
 ## Troubleshooting
@@ -231,11 +250,13 @@ tail -f /var/log/dnsmasq.log
 ```
 Если молчит — убедись что `log-queries=extra` применён, `systemctl restart dnsmasq`.
 
-**Логи показывают `ipset "prod" not found — skipping`**
+**Логи показывают `ipset "ladon_engine" not found — skipping`**
 
-Ты не создал ipset до старта engine. Создай и перезапусти сервис:
+Ты не создал ipset до старта engine (или они не пережили ребут — `netfilter-persistent` не включён, см. Step 3). Создай и перезапусти сервис:
 ```bash
-ipset create prod hash:ip family inet maxelem 65536
+ipset create ladon_engine hash:ip  family inet maxelem 65536
+ipset create ladon_manual hash:ip  family inet maxelem 65536 timeout 86400
+ipset create ladon_cidr   hash:net family inet maxelem 65536
 systemctl restart ladon
 ```
 

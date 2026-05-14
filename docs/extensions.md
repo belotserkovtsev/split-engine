@@ -1,5 +1,7 @@
 # Extensions — преднастроенные allow/deny-списки
 
+← [README](../README.md) · [конфигурация](configuration.md) · [методология](methodology.md)
+
 Готовые подборки доменов для типовых сервисов. Два типа:
 
 - **Allow-extensions** — домены, которые всегда идут через туннель
