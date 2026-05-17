@@ -17,13 +17,21 @@ Ladon реактивно наблюдает DNS-трафик клиентов ш
 
 ## Установка
 
+**Debian/Ubuntu:**
+
 ```bash
 curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/install.sh \
   | sudo bash
 ```
 
-Скрипт ставит бинарь, конфиги, ipset'ы и dnsmasq drop-in — нужен Debian/Ubuntu. Полный runbook + manual install + troubleshooting —
-в [docs/install.md](docs/install.md).
+**OpenWRT (beta, с v1.4.0):**
+
+```sh
+wget -O- https://github.com/belotserkovtsev/ladon/releases/latest/download/install-openwrt.sh | sh
+```
+
+Скрипт ставит бинарь, конфиги, ipset'ы и интеграцию с dnsmasq. Полные runbook'и + manual install + troubleshooting:
+[docs/install.md](docs/install.md) (Debian/Ubuntu), [docs/install-openwrt.md](docs/install-openwrt.md) (OpenWRT).
 
 ## Как работает
 
@@ -42,7 +50,8 @@ curl -fsSL https://github.com/belotserkovtsev/ladon/releases/latest/download/ins
 
 | | |
 |---|---|
-| [docs/install.md](docs/install.md) | install (auto + manual), troubleshooting |
+| [docs/install.md](docs/install.md) | install Debian/Ubuntu (auto + manual), troubleshooting |
+| [docs/install-openwrt.md](docs/install-openwrt.md) | install OpenWRT (beta — aarch64/armv7/x86_64) |
 | [docs/configuration.md](docs/configuration.md) | YAML, CLI, manual lists, exit-compare, prune |
 | [docs/methodology.md](docs/methodology.md) | как Ladon работает |
 | [docs/extensions.md](docs/extensions.md) | bundled allow/deny-пресеты + формат своих списков |
